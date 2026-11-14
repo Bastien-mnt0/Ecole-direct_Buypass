@@ -10,6 +10,16 @@ const BASE = 'https://api.ecoledirecte.com';
 const API_VERSION = process.env.ED_VERSION || '4.75.0'; // à ajuster si l'API répond 517
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
+// Journal local des échanges avec l'API (désactivé par défaut) : ED_LOG=1 node server.js
+// Écrit dans captures/AAAA-MM-JJ.jsonl (ignoré par git, voir .gitignore). Mots de passe, jetons et cookies sont masqués.
+const LOG = process.env.ED_LOG === '1';
+const redact = (v) => Array.isArray(v) ? v.map(redact) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redact(x)])) : v;
+function record(entry) {
+  const dir = path.join(__dirname, 'captures');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, new Date().toISOString().slice(0, 10) + '.jsonl'), JSON.stringify(redact(entry)) + '\n');
+}
+
 async function ed(urlPath, { method = 'POST', token, data, cookies = {} } = {}) {
   const jar = { ...cookies };
   const headers = {
@@ -46,7 +56,9 @@ http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/ed') {
       const { path: p, data, token, cookies } = await readBody(req);
       if (typeof p !== 'string' || !p.startsWith('/v3/')) return send(res, 400, { error: 'chemin refusé' });
-      return send(res, 200, await ed(p, { token, data, cookies }));
+      const out = await ed(p, { token, data, cookies });
+      if (LOG) record({ time: new Date().toISOString(), path: p, request: data, response: out.json });
+      return send(res, 200, out);
     }
     if (req.method === 'GET') {
       const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };

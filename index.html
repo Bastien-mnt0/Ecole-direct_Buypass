@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mon carnet</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
-<header class="top"><button id="burger" class="burger" aria-label="Menu">☰</button><span id="school"></span><span class="grow"></span><select id="eleve" class="hidden" aria-label="Élève"></select><button id="theme" class="icon" aria-label="Changer de thème">◐</button><span id="who" class="pill hidden"></span><button id="logout" class="logout hidden">Déconnexion</button></header>
+<header class="top"><button id="burger" class="burger" aria-label="Menu" aria-expanded="false" aria-controls="side"><i></i><i></i><i></i></button><span id="school"></span><span class="grow"></span><select id="eleve" class="hidden" aria-label="Élève"></select><button id="theme" class="icon" aria-label="Changer de thème">◐</button><span id="who" class="pill hidden"></span><button id="logout" class="logout hidden">Déconnexion</button></header>
+<div id="scrim" class="scrim"></div>
 <div class="layout">
 <nav id="side" class="side hidden" aria-label="Navigation"><div class="brand">CARNET</div>
   <button data-tab="dash" aria-selected="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 3 8-9"/><path d="M3 21h18"/></svg><span>Analyse</span></button>
@@ -20,6 +21,7 @@
     <input id="id" autocomplete="username">
     <label for="pw">Mot de passe</label>
     <div class="pwrap"><input id="pw" type="password" autocomplete="current-password"><button type="button" id="eye" class="eye" aria-label="Afficher le mot de passe" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+    <label class="keep"><input type="checkbox" id="keep"> Rester connecté sur cet appareil</label>
     <button id="go">Se connecter</button>
     <div id="loginErr" class="err" role="alert"></div>
     <p class="mute">Tes identifiants ne quittent pas ton ordinateur, sauf vers EcoleDirecte. Seul l'identifiant est mémorisé, jamais le mot de passe.</p>
@@ -41,6 +43,6 @@
 </main>
 </div>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

@@ -1,0 +1,10 @@
+# Échanges avec l'API EcoleDirecte : données personnelles, à garder sur ton ordinateur
+captures/
+*.har
+*.jsonl
+
+node_modules/
+.wrangler/
+.env
+
+public/

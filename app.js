@@ -1,6 +1,7 @@
 // Adresse du relais : vide = même origine (node server.js en local).
 // Pour GitHub Pages, mets l'URL de ton Cloudflare Worker, ex. 'https://ed-proxy.xxx.workers.dev'
-const PROXY_URL = 'https://ecole-direct-buypass.didierbleu90.workers.dev';
+const WORKER_URL = 'https://ecole-direct-buypass.didierbleu90.workers.dev';
+const PROXY_URL = ['localhost', '127.0.0.1'].includes(location.hostname) ? '' : WORKER_URL; // en local : serveur node ; en ligne : Worker
 const $ = (s) => document.querySelector(s);
 const S = { cookies: {}, token: null, eleves: [], eleve: null, notes: null, tab: 'notes', week: 0, dayOff: 0, sub: 'eval', edtView: matchMedia('(max-width:760px)').matches ? 'day' : 'week', subjects: [] };
 const store = {
@@ -27,20 +28,59 @@ function show(view) {
   if (view !== 'app') $('#eleve').classList.add('hidden');
 }
 
+// ---------- Session conservée (jamais le mot de passe) ----------
+// Par défaut : sessionStorage (effacé à la fermeture de l'onglet). Avec « Rester connecté » : localStorage.
+const SESS = 'ed-session';
+const sess = {
+  save() {
+    if (!S.token || !S.eleve) return;
+    const v = JSON.stringify({ t: S.token, c: S.cookies, e: S.eleves, i: S.eleves.indexOf(S.eleve), s: S.school, a: S.tab, at: Date.now() });
+    try { window[S.keep ? 'localStorage' : 'sessionStorage'].setItem(SESS, v); window[S.keep ? 'sessionStorage' : 'localStorage'].removeItem(SESS); } catch {}
+  },
+  load() {
+    for (const name of ['sessionStorage', 'localStorage']) {
+      try { const v = JSON.parse(window[name].getItem(SESS)); if (v && v.t) return { ...v, keep: name === 'localStorage' }; } catch {}
+    }
+    return null;
+  },
+  clear() { for (const name of ['sessionStorage', 'localStorage']) { try { window[name].removeItem(SESS); } catch {} } },
+};
+function restore() {
+  const v = sess.load();
+  if (!v) return;
+  if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, school: v.s || '', tab: ['dash', 'notes', 'edt'].includes(v.a) ? v.a : 'dash' });
+  S.eleve = S.eleves[v.i] || S.eleves[0];
+  $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
+  $('#eleve').value = String(S.eleves.indexOf(S.eleve));
+  $('#eleve').classList.toggle('hidden', S.eleves.length < 2);
+  setWho(); show('app'); openTab(S.tab);
+}
 async function api(path, data) {
   const r = await fetch(PROXY_URL + '/api/ed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, data, token: S.token, cookies: S.cookies }) });
   const o = await r.json().catch(() => ({ error: 'Relais injoignable : renseigne PROXY_URL dans index.html' }));
   if (o.error) throw new Error(o.error);
   if (o.token) S.token = o.token;
   if (o.cookies) S.cookies = o.cookies;
+  sess.save();
   if ([520, 521, 525].includes(o.json.code)) {
-    show('login'); $('#loginErr').textContent = 'Session expirée : reconnecte-toi.';
+    sess.clear(); show('login'); $('#loginErr').textContent = 'Session expirée : reconnecte-toi.';
     throw new Error('Session expirée');
   }
   return o.json;
 }
 
-$('#burger').onclick = () => $('#side').classList.toggle('open');
+function setNav(open) {
+  $('#side').classList.toggle('open', open);
+  $('#scrim').classList.toggle('show', open);
+  $('#burger').classList.toggle('on', open);
+  $('#burger').setAttribute('aria-expanded', open);
+}
+$('#burger').onclick = () => setNav(!$('#side').classList.contains('open'));
+$('#scrim').onclick = () => setNav(false);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setNav(false); });
+const wide = matchMedia('(min-width:761px)');
+if (wide.addEventListener) wide.addEventListener('change', (e) => { if (e.matches) setNav(false); });
 const applyTheme = (t) => { document.documentElement.dataset.theme = t; store.set('ed-theme', t); };
 applyTheme(store.get('ed-theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 $('#theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
@@ -60,6 +100,7 @@ async function login(fa = []) {
   sel.innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   sel.classList.toggle('hidden', S.eleves.length < 2);
   S.eleve = S.eleves[0]; S.notes = null; S.hist = undefined; S.school = acc.nomEtablissement || ''; setWho();
+  S.keep = $('#keep').checked; store.set('ed-keep', S.keep); sess.save();
   show('app'); openTab('dash');
 }
 
@@ -93,6 +134,7 @@ $('#eye').onclick = () => {
   $('#eye').innerHTML = show ? EYE_OFF : EYE;
 };
 $('#id').value = store.get('ed-id', '');
+$('#keep').checked = !!store.get('ed-keep', false);
 $('#qcmGo').onclick = async () => {
   $('#qcmErr').textContent = '';
   try {
@@ -101,12 +143,12 @@ $('#qcmGo').onclick = async () => {
     await login([{ cn: r.data.cn, cv: r.data.cv }]);
   } catch (e) { $('#qcmErr').textContent = e.message; }
 };
-$('#logout').onclick = () => location.reload();
-$('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = null; S.hist = undefined; setWho(); openTab(S.tab); };
+$('#logout').onclick = () => { sess.clear(); location.reload(); };
+$('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = null; S.hist = undefined; setWho(); sess.save(); openTab(S.tab); };
 
 // ---------- Onglets ----------
 function openTab(name) {
-  S.tab = name; $('#side').classList.remove('open');
+  S.tab = name; setNav(false);
   $('#ptitle').textContent = { dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
@@ -409,3 +451,5 @@ async function loadEdt() {
   $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-v="day" aria-selected="${day}">JOUR</button><button data-v="week" aria-selected="${!day}">SEMAINE</button></div>`);
   document.querySelectorAll('.subtabs button').forEach((b) => (b.onclick = () => { S.edtView = b.dataset.v; openTab('edt'); }));
 }
+
+restore();

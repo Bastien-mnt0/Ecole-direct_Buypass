@@ -12,7 +12,18 @@ body:has(.side:not(.hidden)) .top{padding-left:212px}
 .pill{background:var(--p2);border:1px solid var(--line);border-radius:99px;padding:3px 12px;font-size:.8rem}
 .logout{margin:0;background:none;color:var(--bad);border:1px solid var(--bad);border-radius:6px;padding:3px 12px;font-size:.8rem}
 .icon{margin:0;background:var(--p2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font-size:1rem;line-height:1}
-.burger{display:none;margin:0;background:none;color:var(--ink);font-size:1.4rem;padding:0 8px;line-height:1}
+.burger{display:none;position:relative;width:40px;height:40px;margin:0;padding:0;border-radius:10px;background:var(--p2);border:1px solid var(--line);transition:background .15s,border-color .15s,transform .1s}
+.burger i{position:absolute;left:10px;right:10px;height:2px;border-radius:2px;background:var(--ink);transition:transform .2s,opacity .2s}
+.burger i:nth-child(1){top:12px}.burger i:nth-child(2){top:19px}.burger i:nth-child(3){top:26px}
+.burger:active{transform:scale(.94)}
+.burger.on{border-color:var(--accent)}
+.burger.on i:nth-child(1){transform:translateY(7px) rotate(45deg)}
+.burger.on i:nth-child(2){opacity:0}
+.burger.on i:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+.scrim{position:fixed;inset:0;z-index:2;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.show{opacity:1;pointer-events:auto}
+@media (hover:hover){button:hover{filter:brightness(1.1)}.burger:hover{border-color:var(--accent)}}
+button:disabled{opacity:.6;cursor:wait}
 .layout{display:flex;align-items:stretch}
 .side{position:relative;z-index:2;width:196px;flex:none;background:var(--card);border-right:1px solid var(--line);margin-top:-48px;min-height:100vh}
 .side .brand{height:48px;display:flex;align-items:center;padding:0 18px;font-weight:800;letter-spacing:.14em;color:var(--accent);border-bottom:1px solid var(--line)}
@@ -94,8 +105,8 @@ td.r{text-align:right}
  body:has(.side:not(.hidden)) .top{padding-left:8px}
  body:has(.side:not(.hidden)) .burger{display:block}
  #school{display:none}
- .side{position:fixed;top:0;left:0;bottom:0;margin-top:0;width:240px;min-height:0;transform:translateX(-100%);transition:transform .2s}
- .side.open{transform:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.55)}
+ .side{position:fixed;top:0;left:0;bottom:0;z-index:3;margin-top:0;width:240px;min-height:0;transform:translateX(-100%);transition:transform .2s}
+ .side.open{transform:none;box-shadow:4px 0 24px rgba(0,0,0,.35)}
  main{padding:0 12px 64px}
  .ptitle{margin:14px 0 8px}
  .ptabs{flex-wrap:nowrap;overflow-x:auto}
@@ -126,3 +137,5 @@ td.r{text-align:right}
 .pwrap input{padding-right:46px}
 .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);margin:0;padding:6px 8px;background:none;color:var(--mute);line-height:0}
 .eye[aria-pressed=true]{color:var(--accent)}
+.keep{display:flex;align-items:center;gap:8px;font-weight:400;color:var(--ink);font-size:.9rem;margin:12px 0 0}
+.keep input{width:auto;margin:0}

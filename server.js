@@ -13,7 +13,8 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // Journal local des échanges avec l'API (désactivé par défaut) : ED_LOG=1 node server.js
 // Écrit dans captures/AAAA-MM-JJ.jsonl (ignoré par git, voir .gitignore). Mots de passe, jetons et cookies sont masqués.
 const LOG = process.env.ED_LOG === '1';
-const redact = (v) => Array.isArray(v) ? v.map(redact) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redact(x)])) : v;
+const SECRET = /^(motdepasse|token|cookies|gtk|cn|cv|fa|uuid)$/i;
+const redact = (v) => Array.isArray(v) ? v.map(redact) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, SECRET.test(k) ? '***' : redact(x)])) : v;
 function record(entry) {
   const dir = path.join(__dirname, 'captures');
   fs.mkdirSync(dir, { recursive: true });
@@ -45,7 +46,7 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {} } = {}) 
 }
 
 const readBody = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => ok(b ? JSON.parse(b) : {})); });
-const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
+const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 
 http.createServer(async (req, res) => {
   try {
@@ -61,10 +62,10 @@ http.createServer(async (req, res) => {
       return send(res, 200, out);
     }
     if (req.method === 'GET') {
-      const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
+      const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon' };
       const p = new URL(req.url, 'http://x').pathname, name = p === '/' ? 'index.html' : path.basename(p), file = path.join(__dirname, 'public', name);
       if (!types[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, 'introuvable', 'text/plain');
-      return send(res, 200, fs.readFileSync(file, 'utf8'), types[path.extname(name)]);
+      return send(res, 200, fs.readFileSync(file), types[path.extname(name)]);
     }
     send(res, 404, { error: 'introuvable' });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }

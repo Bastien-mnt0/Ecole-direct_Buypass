@@ -48,7 +48,12 @@ http.createServer(async (req, res) => {
       if (typeof p !== 'string' || !p.startsWith('/v3/')) return send(res, 400, { error: 'chemin refusé' });
       return send(res, 200, await ed(p, { token, data, cookies }));
     }
-    if (req.method === 'GET') return send(res, 200, fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8'), 'text/html; charset=utf-8');
+    if (req.method === 'GET') {
+      const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
+      const p = new URL(req.url, 'http://x').pathname, name = p === '/' ? 'index.html' : path.basename(p), file = path.join(__dirname, 'public', name);
+      if (!types[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, 'introuvable', 'text/plain');
+      return send(res, 200, fs.readFileSync(file, 'utf8'), types[path.extname(name)]);
+    }
     send(res, 404, { error: 'introuvable' });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
 }).listen(PORT, '127.0.0.1', () => console.log(`http://localhost:${PORT}`));

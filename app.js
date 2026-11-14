@@ -370,6 +370,15 @@ function renderDash() {
 }
 
 // ---------- Emploi du temps ----------
+// Couleur de texte lisible selon le fond du cours (EcoleDirecte renvoie parfois du blanc ou des teintes très claires)
+function inkOn(bg) {
+  const s = String(bg).trim();
+  let r, g, b, m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s);
+  if (m) { let h = m[1]; if (h.length === 3) h = [...h].map((c) => c + c).join(''); [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); }
+  else if ((m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(s))) [r, g, b] = [+m[1], +m[2], +m[3]];
+  else return '#fff';
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111' : '#fff';
+}
 const weekNo = (d) => { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7); };
 async function loadEdt() {
   const day = S.edtView === 'day', base = new Date(); base.setHours(12, 0, 0, 0);
@@ -388,7 +397,7 @@ async function loadEdt() {
     const blocks = r.data.filter((c) => c.start_date.slice(0, 10) === key).map((c) => {
       const top = ((min(c.start_date) - H0 * 60) / 60) * PX, h = ((min(c.end_date) - min(c.start_date)) / 60) * PX;
       const bg = c.isAnnule ? '#333' : c.color || `hsl(${hue(c.matiere || c.text)} 70% 38%)`;
-      return `<div class="blk" style="top:${top}px;height:${h}px;background:${esc(bg)}"><b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${c.salle ? '<br>Salle ' + esc(c.salle) : ''}</div>`;
+      return `<div class="blk" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}"><b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${c.salle ? '<br>Salle ' + esc(c.salle) : ''}</div>`;
     }).join('');
     return `<div class="dcol ${key === today ? 'today' : ''}"><div class="dh">${esc(d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }))}</div><div class="dbody" style="height:${(H1 - H0) * PX}px;--px:${PX}px">${blocks}</div></div>`;
   }).join('');

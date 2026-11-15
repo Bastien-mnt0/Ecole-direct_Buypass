@@ -559,4 +559,7 @@ async function loadEdt() {
   document.querySelectorAll('.subtabs button').forEach((b) => (b.onclick = () => { S.edtView = b.dataset.v; openTab('edt'); }));
 }
 
+document.querySelectorAll('.side button').forEach((b) => (b.title = b.textContent.trim()));
+addEventListener('scroll', () => $('.top').classList.toggle('scrolled', scrollY > 4), { passive: true });
+
 restore();

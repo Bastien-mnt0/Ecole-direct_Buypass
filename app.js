@@ -412,6 +412,11 @@ function renderDash() {
 }
 
 // ---------- Cahier de texte : travail à faire et contrôles ----------
+// Nom de salle propre : retire les <balises> d'EcoleDirecte et évite « salle Salle P-5 »
+function room(s) {
+  const t = String(s || '').replace(/<[^>]*>/g, '').trim();
+  return !t ? '' : /^salle\b/i.test(t) ? t : 'Salle ' + t;
+}
 const NOTHING = 'Aucun contrôle et devoir';
 async function hwList() {
   if (S.hw && S.hw.id === S.eleve.id) return S.hw;
@@ -452,7 +457,7 @@ const modal = { open(on) { $('#modal').classList.toggle('show', on); if (on) { m
 async function openCourse(i) {
   const c = (S.edtItems || [])[i]; if (!c) return;
   const date = c.start_date.slice(0, 10), my = (S.mseq = (S.mseq || 0) + 1);
-  const head = `<p class="mute">${esc(longDate(date))} · ${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · <b class="dn">annulé</b>' : ''}<br>${esc(c.prof || '')}${c.salle ? ' · salle ' + esc(c.salle) : ''}</p>`;
+  const head = `<p class="mute">${esc(longDate(date))} · ${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · <b class="dn">annulé</b>' : ''}<br>${esc(c.prof || '')}${room(c.salle) ? ' · ' + esc(room(c.salle)) : ''}</p>`;
   $('#mtitle').textContent = c.text || c.matiere || 'Cours';
   $('#mbody').innerHTML = head + '<p class="mute">Chargement…</p>';
   modal.open(true);
@@ -490,7 +495,7 @@ async function loadHome() {
   const k = (t, v, s) => `<div class="kpi"><small>${t}</small><b>${v}</b><small>${s || ''}</small></div>`;
   const courses = S.edtItems.map((c, i) => {
     const col = c.isAnnule ? 'var(--mute)' : c.color && inkOn(c.color) === '#fff' ? c.color : 'var(--accent)';
-    return `<div class="hc ${c.isAnnule ? 'off' : ''}" role="button" tabindex="0" data-i="${i}" style="border-left-color:${esc(col)}"><span class="num">${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}</span><span><b>${esc(c.text)}</b><br><span class="mute">${esc(c.prof || '')}${c.salle ? ' · salle ' + esc(c.salle) : ''}</span></span>${badge(c)}</div>`;
+    return `<div class="hc ${c.isAnnule ? 'off' : ''}" role="button" tabindex="0" data-i="${i}" style="border-left-color:${esc(col)}"><span class="num">${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}</span><span><b>${esc(c.text)}</b><br><span class="mute">${esc(c.prof || '')}${room(c.salle) ? ' · ' + esc(room(c.salle)) : ''}</span></span>${badge(c)}</div>`;
   }).join('') || '<p class="mute">Aucun cours.</p>';
   const days = Object.keys(hw.list).sort().slice(0, 4);
   const det = await Promise.all(days.map(async (d) => [d, (await hwDay(d)).filter(hasWork).map(todo)]));
@@ -546,7 +551,7 @@ async function loadEdt() {
     const blocks = r.data.filter((c) => c.start_date.slice(0, 10) === key).map((c) => {
       const top = ((min(c.start_date) - H0 * 60) / 60) * PX, h = ((min(c.end_date) - min(c.start_date)) / 60) * PX;
       const bg = c.isAnnule ? '#333' : c.color || `hsl(${hue(c.matiere || c.text)} 70% 38%)`;
-      return `<div class="blk" role="button" tabindex="0" data-i="${r.data.indexOf(c)}" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}">${badge(c)}<b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${c.salle ? '<br>Salle ' + esc(c.salle) : ''}</div>`;
+      return `<div class="blk" role="button" tabindex="0" data-i="${r.data.indexOf(c)}" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}">${badge(c)}<b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${room(c.salle) ? '<br>' + esc(room(c.salle)) : ''}</div>`;
     }).join('');
     return `<div class="dcol ${key === today ? 'today' : ''}"><div class="dh">${esc(d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }))}</div><div class="dbody" style="height:${(H1 - H0) * PX}px;--px:${PX}px">${blocks}</div></div>`;
   }).join('');

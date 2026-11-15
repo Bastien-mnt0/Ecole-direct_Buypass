@@ -49,7 +49,7 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, school: v.s || '', tab: ['dash', 'notes', 'edt'].includes(v.a) ? v.a : 'dash' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
@@ -101,7 +101,7 @@ async function login(fa = []) {
   sel.classList.toggle('hidden', S.eleves.length < 2);
   S.eleve = S.eleves[0]; S.notes = null; S.hist = undefined; S.school = acc.nomEtablissement || ''; setWho();
   S.keep = $('#keep').checked; store.set('ed-keep', S.keep); sess.save();
-  show('app'); openTab('dash');
+  show('app'); openTab('home');
 }
 
 async function startQcm() {
@@ -149,11 +149,11 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 // ---------- Onglets ----------
 function openTab(name) {
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ dash: loadDash, notes: loadNotes, edt: loadEdt })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -403,13 +403,113 @@ function renderDash() {
     <div class="panel"><h3>Évolution de la moyenne générale</h3>${chart(gser, gpred, { label: 'Moyenne générale' })}<div class="mute"><span class="up">●</span> hausse · <span class="dn">●</span> baisse · <span style="color:var(--accent)">╌╌</span> prévision</div></div>
     <div class="panel"><h3>Moyenne par trimestre</h3>${items.length ? bars(items) : '<p class="mute">Pas encore de notes.</p>'}<div class="mute">Barre verte/rouge : progression par rapport au trimestre précédent · trait pointillé : moyenne de la classe</div></div>
     ${M.years ? `<div class="panel"><h3>Années précédentes</h3>${bars(hItems)}<div class="mute">Le modèle s'appuie sur ${M.years} année${M.years > 1 ? 's' : ''} d'historique : il rapproche tes prochaines notes de ton niveau habituel dans chaque matière, d'autant plus que tu as peu de notes cette année.</div></div>` : '<div class="panel mute">Aucune année précédente n\'est accessible sur ce compte : les prévisions reposent sur ta tendance actuelle.</div>'}
-    <div class="panel ctrl"><b>Prévision</b> ${sel('dN', [[1, '1 note'], [3, '3 notes'], [5, '5 notes'], [10, '10 notes']], S.dN)} de plus par matière, valant ${sel('dScen', [...(M.years ? [['hist', 'Modèle historique']] : []), ['trend', 'Moyenne de tes 3 dernières notes'], ['stable', 'Moyenne actuelle'], ['high', 'Ta moyenne + 2 points'], ['low', 'Ta moyenne − 2 points']], S.dScen)}</div>
+    <div class="panel ctrl"><b>Prévision</b> ${sel('dN', [[1, '1 note'], [3, '3 notes'], [5, '5 notes'], [10, '10 notes']], S.dN)} de plus par matière · modèle de calcul : ${sel('dScen', [...(M.years ? [['hist', 'Modèle historique']] : []), ['trend', 'Moyenne de tes 3 dernières notes'], ['stable', 'Moyenne actuelle'], ['high', 'Ta moyenne + 2 points'], ['low', 'Ta moyenne − 2 points']], S.dScen)}</div>
     <h3 style="margin-top:18px">Évolution par matière</h3><div class="sgrid">${cards}</div>
     <p class="mute">Estimation indicative : elle suppose que tes prochaines notes (coef 1) auront la valeur du scénario choisi ; elle ne prédit pas tes vrais résultats.</p>`;
   document.querySelectorAll('.ptab').forEach((b) => (b.onclick = () => { S.periode = b.dataset.p; renderDash(); }));
   $('#dN').onchange = (e) => { S.dN = +e.target.value; renderDash(); };
   $('#dScen').onchange = (e) => { S.dScen = e.target.value; renderDash(); };
 }
+
+// ---------- Cahier de texte : travail à faire et contrôles ----------
+const NOTHING = 'Aucun contrôle et devoir';
+async function hwList() {
+  if (S.hw && S.hw.id === S.eleve.id) return S.hw;
+  const r = await api(`/v3/Eleves/${S.eleve.id}/cahierdetexte.awp?verbe=get`, {});
+  S.hw = { id: S.eleve.id, list: r.code === 200 && r.data ? r.data : {}, days: {} };
+  return S.hw;
+}
+async function hwDay(date) {
+  const h = await hwList();
+  if (!h.days[date]) {
+    const r = await api(`/v3/Eleves/${S.eleve.id}/cahierdetexte/${date}.awp?verbe=get`, {}).catch(() => null);
+    h.days[date] = r && r.code === 200 ? r.data?.matieres || [] : [];
+  }
+  return h.days[date];
+}
+const safeText = (x) => { try { return textOf(b64(x)); } catch { return ''; } };
+// seulement le « travail à faire » (le contenu de séance est ignoré) et les contrôles annoncés
+const todo = (m) => ({ matiere: m.matiere, text: m.aFaire && m.aFaire.contenu ? safeText(m.aFaire.contenu) : '', interro: !!m.interrogation, done: !!(m.aFaire && m.aFaire.effectue) });
+const hasWork = (m) => (m.aFaire && m.aFaire.contenu) || m.interrogation;
+const sameSubject = (m, c) => (m.codeMatiere && m.codeMatiere === c.codeMatiere) || norm(m.matiere) === norm(c.matiere || c.text);
+const workHtml = (t) => `<div class="hwi"><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${t.done ? '<span class="tag">fait</span>' : ''}<div>${t.text ? esc(t.text) : '<span class="mute">Contrôle annoncé</span>'}</div></div>`;
+async function loadDevoirs() {
+  const h = await hwList();
+  const days = Object.keys(h.list).sort().slice(0, 10);
+  const det = await Promise.all(days.map(async (d) => [d, (await hwDay(d)).filter(hasWork).map(todo)]));
+  const cards = det.filter(([, l]) => l.length).map(([d, l]) => `<div class="card"><h3 style="text-transform:capitalize">Pour ${esc(longDate(d))}</h3>${l.map(workHtml).join('')}</div>`).join('');
+  $('#view').innerHTML = cards || `<div class="card"><p>${NOTHING}</p></div>`;
+}
+// Pastille sur un cours : rouge « ! » = contrôle, jaune = devoir à faire pour ce cours
+function badge(c) {
+  const l = ((S.hw && S.hw.list) || {})[c.start_date.slice(0, 10)], e = (Array.isArray(l) ? l : []).filter((m) => sameSubject(m, c));
+  if (!e.length) return '';
+  const ctl = e.some((m) => m.interrogation), hw = e.some((m) => m.aFaire !== false && !m.interrogation) || (ctl && e.some((m) => m.aFaire === true));
+  return `<span class="dots">${ctl ? '<span class="dot ctl" title="Contrôle" aria-label="Contrôle">!</span>' : ''}${hw ? '<span class="dot hw" title="Devoir à faire" aria-label="Devoir à faire"></span>' : ''}</span>`;
+}
+// Détail d'un cours (clic sur un cours de l'emploi du temps)
+const modal = { open(on) { $('#modal').classList.toggle('show', on); if (on) { modal.from = document.activeElement; $('.mclose').focus(); } else if (modal.from) { modal.from.focus(); modal.from = null; } } };
+async function openCourse(i) {
+  const c = (S.edtItems || [])[i]; if (!c) return;
+  const date = c.start_date.slice(0, 10), my = (S.mseq = (S.mseq || 0) + 1);
+  const head = `<p class="mute">${esc(longDate(date))} · ${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · <b class="dn">annulé</b>' : ''}<br>${esc(c.prof || '')}${c.salle ? ' · salle ' + esc(c.salle) : ''}</p>`;
+  $('#mtitle').textContent = c.text || c.matiere || 'Cours';
+  $('#mbody').innerHTML = head + '<p class="mute">Chargement…</p>';
+  modal.open(true);
+  let items = [];
+  try { items = (await hwDay(date)).filter((m) => hasWork(m) && sameSubject(m, c)).map(todo); } catch {}
+  if (my === S.mseq) $('#mbody').innerHTML = head + (items.length ? items.map(workHtml).join('') : `<p><b>${NOTHING}</b></p>`);
+}
+$('.mclose').onclick = () => modal.open(false);
+$('#modal').onclick = (e) => { if (e.target === $('#modal')) modal.open(false); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#modal').classList.contains('show')) modal.open(false); });
+document.addEventListener('click', (e) => { const b = e.target.closest('.blk,.hc'); if (b) openCourse(+b.dataset.i); });
+document.addEventListener('keydown', (e) => { const b = e.target.closest && e.target.closest('.blk,.hc'); if (b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openCourse(+b.dataset.i); } });
+
+// ---------- Accueil ----------
+async function ensureNotes() {
+  if (S.notes) return;
+  const r = await api(`/v3/eleves/${S.eleve.id}/notes.awp?verbe=get`, { anneeScolaire: '' });
+  if (r.code !== 200) throw new Error(r.message || 'Impossible de charger les notes');
+  S.notes = r.data; S.periode = undefined;
+}
+async function loadHome() {
+  await ensureNotes();
+  const periodes = (S.notes.periodes || []).filter((p) => !p.annuel);
+  if (S.periode === undefined) S.periode = (periodes.find((p) => !p.cloture) || {}).codePeriode || '';
+  ST = structure();
+  const notes = (S.notes.notes || []).filter((n) => !S.periode || n.codePeriode === S.periode);
+  const day = nextSchoolDay(new Date()), dkey = iso(day), isToday = dkey === iso(new Date());
+  const [hw, edt] = await Promise.all([hwList(), api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: dkey, dateFin: dkey, avecTrous: false }).catch(() => null)]);
+  S.edtItems = edt && edt.code === 200 ? edt.data.sort((a, b) => a.start_date.localeCompare(b.start_date)) : [];
+  const gser = [...new Set(notes.map((n) => n.date))].sort().map((d) => general(notes.filter((n) => n.date <= d))).filter((v) => v != null);
+  const g = gser.length ? gser[gser.length - 1] : null, cls = toNum(ST.gst && ST.gst[0]);
+  const delta = (v) => `<span class="${v >= 0 ? 'up' : 'dn'}">${v >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(v))}</span>`;
+  const entries = Object.keys(hw.list).sort().flatMap((d) => (Array.isArray(hw.list[d]) ? hw.list[d] : []).map((m) => ({ ...m, d })));
+  const nextCtl = entries.find((m) => m.interrogation), nbHw = entries.filter((m) => m.aFaire !== false && !m.interrogation).length;
+  const k = (t, v, s) => `<div class="kpi"><small>${t}</small><b>${v}</b><small>${s || ''}</small></div>`;
+  const courses = S.edtItems.map((c, i) => {
+    const col = c.isAnnule ? 'var(--mute)' : c.color && inkOn(c.color) === '#fff' ? c.color : 'var(--accent)';
+    return `<div class="hc ${c.isAnnule ? 'off' : ''}" role="button" tabindex="0" data-i="${i}" style="border-left-color:${esc(col)}"><span class="num">${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}</span><span><b>${esc(c.text)}</b><br><span class="mute">${esc(c.prof || '')}${c.salle ? ' · salle ' + esc(c.salle) : ''}</span></span>${badge(c)}</div>`;
+  }).join('') || '<p class="mute">Aucun cours.</p>';
+  const days = Object.keys(hw.list).sort().slice(0, 4);
+  const det = await Promise.all(days.map(async (d) => [d, (await hwDay(d)).filter(hasWork).map(todo)]));
+  const work = det.flatMap(([d, l]) => l.map((t) => ({ ...t, d }))).slice(0, 5).map((t) => `<div class="hrow"><span><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}<br><span class="mute">pour ${esc(longDate(t.d))}${t.text ? ' · ' + esc(t.text.length > 70 ? t.text.slice(0, 70) + '…' : t.text) : ''}</span></span></div>`).join('') || `<p>${NOTHING}</p>`;
+  const last = notes.filter((n) => toNum(n.valeur) != null).sort((a, b) => String(b.dateSaisie || b.date).localeCompare(String(a.dateSaisie || a.date))).slice(0, 5)
+    .map((n) => `<div class="hrow"><span><b>${esc(n.libelleMatiere)}</b><br><span class="mute">${esc(n.devoir || '')} · ${esc(longDate(n.date))}</span></span><span class="num" style="color:${color((toNum(n.valeur) / (toNum(n.noteSur) || 20)) * 20)}">${esc(n.valeur)}/${esc(n.noteSur)}</span></div>`).join('') || '<p class="mute">Aucune note pour l\'instant.</p>';
+  $('#view').innerHTML = `<div class="hello"><h2>Bonjour ${esc(S.eleve.prenom)}</h2><div class="mute">${esc(longDate(iso(new Date())))}</div></div>
+    <div class="kpis">${k('Moyenne générale', `<span style="color:${color(g)}">${fmt(g)}</span>`, gser.length > 1 ? delta(g - gser[gser.length - 2]) + ' dernière note' : '')}
+      ${k('Classe', fmt(cls), g != null && cls != null ? delta(g - cls) + ' vs classe' : '')}
+      ${k('Devoirs à faire', nbHw, nbHw ? 'à venir' : nextCtl ? 'Aucun devoir' : NOTHING)}
+      ${k('Prochain contrôle', nextCtl ? esc(nextCtl.matiere) : '–', nextCtl ? esc(longDate(nextCtl.d)) : 'Aucun contrôle')}</div>
+    <div class="hgrid">
+      <div class="panel"><h3>${isToday ? "Aujourd'hui" : 'Prochain jour de cours : ' + esc(longDate(dkey))}</h3>${courses}<button class="link" data-go="edt">Emploi du temps →</button></div>
+      <div class="panel"><h3>À faire</h3>${work}<button class="link" data-go="devoirs">Cahier de texte →</button></div>
+      <div class="panel"><h3>Dernières notes</h3>${last}<button class="link" data-go="notes">Toutes les notes →</button></div>
+      <div class="panel"><h3>Évolution de la moyenne</h3>${chart(gser, [], { label: 'Moyenne générale' })}<button class="link" data-go="dash">Analyse et prévisions →</button></div>
+    </div>`;
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) openTab(b.dataset.go); });
 
 // ---------- Emploi du temps ----------
 // Couleur de texte lisible selon le fond du cours (EcoleDirecte renvoie parfois du blanc ou des teintes très claires)
@@ -421,14 +521,21 @@ function inkOn(bg) {
   else return '#fff';
   return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111' : '#fff';
 }
+// Samedi et dimanche : on affiche le lundi suivant
+function nextSchoolDay(d) {
+  const x = new Date(d); x.setHours(12, 0, 0, 0);
+  if (x.getDay() === 6) x.setDate(x.getDate() + 2); else if (x.getDay() === 0) x.setDate(x.getDate() + 1);
+  return x;
+}
 const weekNo = (d) => { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7); };
 async function loadEdt() {
-  const day = S.edtView === 'day', base = new Date(); base.setHours(12, 0, 0, 0);
+  const day = S.edtView === 'day', base = nextSchoolDay(new Date());
   const f = new Date(base); f.setDate(f.getDate() + S.dayOff); const focus = iso(f);
   const mon = new Date(day ? f : base); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7) + (day ? 0 : S.week * 7));
   const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
   const r = await api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: iso(mon), dateFin: iso(sun), avecTrous: false });
   if (r.code !== 200) throw new Error(r.message || "Impossible de charger l'emploi du temps");
+  await hwList(); S.edtItems = r.data;
   const min = (t) => +t.slice(11, 13) * 60 + +t.slice(14, 16);
   const H0 = 7, H1 = 20;
   const PX = day ? 80 : 56, today = iso(new Date());
@@ -439,12 +546,12 @@ async function loadEdt() {
     const blocks = r.data.filter((c) => c.start_date.slice(0, 10) === key).map((c) => {
       const top = ((min(c.start_date) - H0 * 60) / 60) * PX, h = ((min(c.end_date) - min(c.start_date)) / 60) * PX;
       const bg = c.isAnnule ? '#333' : c.color || `hsl(${hue(c.matiere || c.text)} 70% 38%)`;
-      return `<div class="blk" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}"><b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${c.salle ? '<br>Salle ' + esc(c.salle) : ''}</div>`;
+      return `<div class="blk" role="button" tabindex="0" data-i="${r.data.indexOf(c)}" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}">${badge(c)}<b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${c.salle ? '<br>Salle ' + esc(c.salle) : ''}</div>`;
     }).join('');
     return `<div class="dcol ${key === today ? 'today' : ''}"><div class="dh">${esc(d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }))}</div><div class="dbody" style="height:${(H1 - H0) * PX}px;--px:${PX}px">${blocks}</div></div>`;
   }).join('');
   const fr = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-  $('#view').innerHTML = `<div class="card"><div class="nav2"><b>${day ? esc(longDate(focus)) : `${esc(fr(mon))} – ${esc(fr(sun))} (Semaine ${weekNo(mon)})`}</b><span><button id="tod">Aujourd'hui</button><button id="prev" aria-label="Semaine précédente">‹</button><button id="next" aria-label="Semaine suivante">›</button></span></div><div class="cal"><div class="axis"><div class="dh"></div>${hours}</div>${cols}</div></div>`;
+  $('#view').innerHTML = `<div class="card"><div class="nav2"><b>${day ? esc(longDate(focus)) : `${esc(fr(mon))} – ${esc(fr(sun))} (Semaine ${weekNo(mon)})`}</b><span><button id="tod">Aujourd'hui</button><button id="prev" aria-label="Semaine précédente">‹</button><button id="next" aria-label="Semaine suivante">›</button></span></div><div class="cal"><div class="axis"><div class="dh"></div>${hours}</div>${cols}</div><div class="mute legend"><span><span class="dot ctl">!</span> contrôle</span><span><span class="dot hw"></span> devoir à faire</span><span>Touche un cours pour le détail</span></div></div>`;
   $('#tod').onclick = () => { S.week = 0; S.dayOff = 0; openTab('edt'); };
   $('#prev').onclick = () => { day ? S.dayOff-- : S.week--; openTab('edt'); };
   $('#next').onclick = () => { day ? S.dayOff++ : S.week++; openTab('edt'); };

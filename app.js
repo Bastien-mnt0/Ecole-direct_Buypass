@@ -435,7 +435,7 @@ async function hwDay(date) {
 const safeText = (x) => { try { return textOf(b64(x)); } catch { return ''; } };
 // seulement le « travail à faire » (le contenu de séance est ignoré) et les contrôles annoncés
 const docsOf = (m) => (m.aFaire && Array.isArray(m.aFaire.documents) ? m.aFaire.documents : []).filter((d) => d && d.id != null).map((d) => ({ id: d.id, type: d.type || 'FICHIER_CDT', name: String(d.libelle || 'Fichier') }));
-const todo = (m) => ({ matiere: m.matiere, text: m.aFaire && m.aFaire.contenu ? safeText(m.aFaire.contenu) : '', interro: !!m.interrogation, done: !!(m.aFaire && m.aFaire.effectue), docs: docsOf(m) });
+const todo = (m) => ({ id: m.aFaire && m.aFaire.idDevoir != null ? m.aFaire.idDevoir : null, matiere: m.matiere, text: m.aFaire && m.aFaire.contenu ? safeText(m.aFaire.contenu) : '', interro: !!m.interrogation, done: !!(m.aFaire && m.aFaire.effectue), docs: docsOf(m) });
 const hasWork = (m) => (m.aFaire && m.aFaire.contenu) || m.interrogation;
 const sameSubject = (m, c) => (m.codeMatiere && m.codeMatiere === c.codeMatiere) || norm(m.matiere) === norm(c.matiere || c.text);
 const workHtml = (t) => `<div class="hwi"><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${t.done ? '<span class="tag">fait</span>' : ''}<div>${t.text ? esc(t.text) : '<span class="mute">Contrôle annoncé</span>'}</div>${docsHtml(t.docs)}</div>`;
@@ -486,13 +486,95 @@ document.addEventListener('click', async (e) => {
   } catch (err) { b.textContent = label; msg.textContent = err.message || 'Fichier indisponible'; }
   b.disabled = false;
 });
-async function loadDevoirs() {
+// ---------- Devoirs : urgence, progression, devoirs personnels ----------
+const HW_ST = { todo: 'À faire', doing: 'En cours', done: 'Terminé' };
+const HW_UR = { red: 'Urgent', orange: 'Échéance proche', green: 'À venir' };
+const HW_RANK = { red: 0, orange: 1, green: 2 };
+const HW_SRANK = { todo: 0, doing: 1, done: 2 };
+const hwKey = (k) => `ed-hw-${k}:${S.eleve.id}`;
+const hwHash = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) | 0; return (h >>> 0).toString(36); };
+function hwAuto(date) {
+  const d = Math.round((new Date(date + 'T00:00:00') - new Date(iso(new Date()) + 'T00:00:00')) / 864e5);
+  return d <= 1 ? 'red' : d <= 3 ? 'orange' : 'green';
+}
+async function hwEntries() {
   const h = await hwList();
   const days = Object.keys(h.list).sort().slice(0, 10);
   const det = await Promise.all(days.map(async (d) => [d, (await hwDay(d)).filter(hasWork).map(todo)]));
-  const cards = det.filter(([, l]) => l.length).map(([d, l]) => `<div class="card"><h3 style="text-transform:capitalize">Pour ${esc(longDate(d))}</h3>${l.map(workHtml).join('')}</div>`).join('');
-  $('#view').innerHTML = cards || `<div class="card"><p>${NOTHING}</p></div>`;
+  const saved = store.get(hwKey('etat'), {}), seen = {};
+  const sync = det.flatMap(([d, l]) => l.map((t) => {
+    const base = `ed:${d}:${t.id != null ? t.id : norm(t.matiere) + ':' + hwHash(t.text + (t.interro ? '#c' : ''))}`;
+    const key = seen[base] ? `${base}~${seen[base]++}` : (seen[base] = 1, base);
+    const o = saved[key] || {};
+    return { key, src: 'ed', date: d, matiere: t.matiere, text: t.text, interro: t.interro, docs: t.docs, st: o.st || (t.done ? 'done' : 'todo'), urg: o.urg || 'auto' };
+  }));
+  const mine = store.get(hwKey('perso'), []).map((p) => ({ key: 'me:' + p.id, src: 'me', date: p.date, matiere: p.matiere, titre: p.titre, text: p.desc || '', interro: false, docs: [], st: p.st, urg: p.urg }));
+  return sync.concat(mine).map((e) => ({ ...e, level: e.urg === 'auto' ? hwAuto(e.date) : e.urg }));
 }
+const hwSel = (attr, opts, cur, label) => `<select ${attr} aria-label="${label}">${opts.map(([v, l]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+function hwItem(e, grouped) {
+  const when = grouped ? '' : `<span class="mute"> · pour ${esc(longDate(e.date))}</span>`;
+  const title = e.src === 'me' ? `<div><b>${esc(e.titre)}</b></div>` : '';
+  const body = e.text ? `<div>${esc(e.text)}</div>` : e.interro ? '<div><span class="mute">Contrôle annoncé</span></div>' : '';
+  const states = Object.entries(HW_ST).map(([k, l]) => `<button type="button" class="ptab" data-hw="st" data-v="${k}" aria-selected="${e.st === k}">${l}</button>`).join('');
+  const urgs = hwSel('data-hwu', [['auto', 'Urgence : auto'], ...Object.entries(HW_UR)], e.urg, 'Urgence');
+  const acts = e.src === 'me' ? '<button type="button" class="hwb" data-hw="edit">Modifier</button><button type="button" class="hwb del" data-hw="del">Supprimer</button>' : '';
+  return `<div class="hwi ${e.src === 'me' ? 'me' : ''} ${e.st === 'done' ? 'fin' : ''}" data-key="${esc(e.key)}"><div><span class="urg ${e.level}" title="${HW_UR[e.level]}" role="img" aria-label="${HW_UR[e.level]}"></span><b>${esc(e.matiere)}</b>${e.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${e.src === 'me' ? '<span class="tag">personnel</span>' : '<span class="tag tag-ed">École Directe</span>'}${when}</div>${title}${body}${docsHtml(e.docs)}<div class="ctrl hwc"><span class="ptabs">${states}</span>${urgs}${acts}</div></div>`;
+}
+async function hwRender() {
+  const all = await hwEntries();
+  if (S.tab !== 'devoirs') return;
+  S.hwAll = all;
+  const p = store.get('ed-hw-prefs', {}), f = { urg: p.urg || '', st: p.st || '', src: p.src || '', sort: p.sort || 'date' };
+  const list = all.filter((e) => (!f.urg || e.level === f.urg) && (!f.st || e.st === f.st) && (!f.src || e.src === f.src));
+  const byDate = (a, b) => a.date.localeCompare(b.date);
+  list.sort(f.sort === 'urg' ? (a, b) => HW_RANK[a.level] - HW_RANK[b.level] || byDate(a, b) : f.sort === 'st' ? (a, b) => HW_SRANK[a.st] - HW_SRANK[b.st] || byDate(a, b) : (a, b) => byDate(a, b) || HW_RANK[a.level] - HW_RANK[b.level]);
+  const bar = `<div class="card"><div class="ctrl hwbar">${hwSel('data-hwf="urg"', [['', 'Urgence : toutes'], ...Object.entries(HW_UR)], f.urg, 'Filtrer par urgence')}${hwSel('data-hwf="st"', [['', 'État : tous'], ...Object.entries(HW_ST)], f.st, 'Filtrer par état')}${hwSel('data-hwf="src"', [['', 'Origine : toutes'], ['ed', 'École Directe'], ['me', 'Personnels']], f.src, 'Filtrer par origine')}${hwSel('data-hwf="sort"', [['date', 'Tri : date'], ['urg', 'Tri : urgence'], ['st', 'Tri : état']], f.sort, 'Trier')}<button type="button" data-hw="add">Ajouter un devoir</button></div><div class="mute legend"><span><span class="urg red"></span>urgent</span><span><span class="urg orange"></span>échéance proche</span><span><span class="urg green"></span>à venir</span></div></div>`;
+  let body;
+  if (!all.length) body = `<div class="card"><p>${NOTHING}</p></div>`;
+  else if (!list.length) body = '<div class="card"><p class="mute">Aucun devoir ne correspond aux filtres.</p></div>';
+  else if (f.sort === 'date') body = [...new Set(list.map((e) => e.date))].map((d) => `<div class="card"><h3 style="text-transform:capitalize">Pour ${esc(longDate(d))}</h3>${list.filter((e) => e.date === d).map((e) => hwItem(e, true)).join('')}</div>`).join('');
+  else body = `<div class="card">${list.map((e) => hwItem(e, false)).join('')}</div>`;
+  $('#view').innerHTML = bar + body;
+}
+const loadDevoirs = hwRender;
+const hwApply = (fn) => { fn(); hwRender().catch((e) => { $('#appErr').textContent = e.message; }); };
+function hwPatch(key, patch) {
+  if (key.startsWith('me:')) store.set(hwKey('perso'), store.get(hwKey('perso'), []).map((p) => (p.id === key.slice(3) ? { ...p, ...patch } : p)));
+  else { const s = store.get(hwKey('etat'), {}); s[key] = { ...s[key], ...patch }; store.set(hwKey('etat'), s); }
+}
+function hwForm(p) {
+  const v = { titre: '', matiere: '', desc: '', date: iso(new Date()), urg: 'auto', st: 'todo', ...p };
+  const subjects = [...new Set((S.hwAll || []).map((e) => e.matiere).filter(Boolean))].sort();
+  const opt = (o, cur) => Object.entries(o).map(([k, l]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${l}</option>`).join('');
+  $('#mtitle').textContent = p ? 'Modifier le devoir' : 'Nouveau devoir';
+  $('#mbody').innerHTML = `<label for="hwT">Intitulé</label><input id="hwT" maxlength="120" value="${esc(v.titre)}"><label for="hwM">Matière</label><input id="hwM" list="hwML" maxlength="60" value="${esc(v.matiere)}"><datalist id="hwML">${subjects.map((s) => `<option value="${esc(s)}">`).join('')}</datalist><label for="hwDe">Description (facultative)</label><textarea id="hwDe" rows="3" maxlength="1000">${esc(v.desc)}</textarea><label for="hwD">Date limite</label><input id="hwD" type="date" value="${esc(v.date)}"><label for="hwU">Urgence</label><select id="hwU">${opt({ auto: 'Automatique (selon la date limite)', ...HW_UR }, v.urg)}</select><label for="hwS">État</label><select id="hwS">${opt(HW_ST, v.st)}</select><button type="button" id="hwSave">Enregistrer</button><div id="hwErr" class="err" role="alert"></div>`;
+  $('#hwSave').onclick = () => {
+    const o = { titre: $('#hwT').value.trim(), matiere: $('#hwM').value.trim(), desc: $('#hwDe').value.trim(), date: $('#hwD').value, urg: $('#hwU').value, st: $('#hwS').value };
+    if (!o.titre || !o.matiere || !/^\d{4}-\d{2}-\d{2}$/.test(o.date)) { $('#hwErr').textContent = "Renseigne l'intitulé, la matière et la date limite."; return; }
+    hwApply(() => {
+      const l = store.get(hwKey('perso'), []);
+      store.set(hwKey('perso'), p ? l.map((x) => (x.id === p.id ? { ...x, ...o } : x)) : l.concat({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...o }));
+    });
+    modal.open(false);
+  };
+  modal.open(true);
+  $('#hwT').focus();
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-hw]'); if (!b) return;
+  const a = b.dataset.hw, key = b.closest('.hwi')?.dataset.key;
+  if (a === 'add') return hwForm();
+  if (!key) return;
+  if (a === 'st') hwApply(() => hwPatch(key, { st: b.dataset.v }));
+  else if (a === 'edit') hwForm(store.get(hwKey('perso'), []).find((p) => p.id === key.slice(3)));
+  else if (a === 'del' && confirm('Supprimer ce devoir ?')) hwApply(() => store.set(hwKey('perso'), store.get(hwKey('perso'), []).filter((p) => p.id !== key.slice(3))));
+});
+document.addEventListener('change', (e) => {
+  const f = e.target.closest('[data-hwf]'), u = e.target.closest('[data-hwu]');
+  if (f) hwApply(() => store.set('ed-hw-prefs', { ...store.get('ed-hw-prefs', {}), [f.dataset.hwf]: f.value }));
+  else if (u) hwApply(() => hwPatch(u.closest('.hwi').dataset.key, { urg: u.value }));
+});
 // Rapproche cours annulés et remplacements (événements distincts dans l'EDT) : c.st = annule | deplace | remplace, c.from/c.to = cours lié, c.hide = annulé déjà représenté par son remplacement
 const EDT_ST = { annule: 'ANNULÉ', deplace: 'DÉPLACÉ', remplace: 'REMPLACÉ' };
 function edtPrep(list) {

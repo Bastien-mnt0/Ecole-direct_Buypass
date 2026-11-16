@@ -25,6 +25,7 @@ function show(view) {
   $('#logout').classList.toggle('hidden', view !== 'app');
   $('#side').classList.toggle('hidden', view !== 'app');
   $('#who').classList.toggle('hidden', view !== 'app');
+  $('#sport').classList.toggle('hidden', view !== 'app');
   if (view !== 'app') $('#eleve').classList.add('hidden');
 }
 
@@ -669,6 +670,7 @@ async function loadHome() {
       <div class="panel"><h3>Dernières notes</h3>${last}<button class="link" data-go="notes">Toutes les notes →</button></div>
       <div class="panel"><h3>Évolution de la moyenne</h3>${chart(gser, [], { label: 'Moyenne générale' })}<button class="link" data-go="dash">Analyse et prévisions →</button></div>
     </div>`;
+  wxMount('home');
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) openTab(b.dataset.go); });
 
@@ -718,9 +720,121 @@ async function loadEdt() {
   $('#next').onclick = () => { day ? S.dayOff++ : S.week++; openTab('edt'); };
   $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-v="day" aria-selected="${day}">JOUR</button><button data-v="week" aria-selected="${!day}">SEMAINE</button></div>`);
   document.querySelectorAll('.subtabs button').forEach((b) => (b.onclick = () => { S.edtView = b.dataset.v; openTab('edt'); }));
+  wxMount('edt');
 }
 
 document.querySelectorAll('.side button').forEach((b) => (b.title = b.textContent.trim()));
 addEventListener('scroll', () => $('.top').classList.toggle('scrolled', scrollY > 4), { passive: true });
+
+// ---------- Mode Sportif ----------
+const WX_PLACE = { name: 'Marseille', lat: 43.2965, lon: 5.3698 };
+const WX_MODELS = { icon_eu: ['ICON-EU (DWD)', '≈ 7 km'], ecmwf_ifs: ['ECMWF IFS', '≈ 9 km'], gfs_seamless: ['GFS (NOAA)', '≈ 13 km'] };
+const WX_CODE = { 0: 'Ciel dégagé', 1: 'Plutôt dégagé', 2: 'Partiellement nuageux', 3: 'Couvert', 45: 'Brouillard', 48: 'Brouillard givrant', 51: 'Bruine légère', 53: 'Bruine', 55: 'Bruine dense', 56: 'Bruine verglaçante', 57: 'Bruine verglaçante', 61: 'Pluie faible', 63: 'Pluie', 65: 'Pluie forte', 66: 'Pluie verglaçante', 67: 'Pluie verglaçante', 71: 'Neige faible', 73: 'Neige', 75: 'Neige forte', 77: 'Grains de neige', 80: 'Averses faibles', 81: 'Averses', 82: 'Averses violentes', 85: 'Averses de neige', 86: 'Averses de neige', 95: 'Orage', 96: 'Orage et grêle', 99: 'Orage et grêle' };
+const WX_DIR = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
+const wxDir = (d) => (d == null ? '–' : WX_DIR[Math.round(d / 22.5) % 16]);
+const wxArrow = (d) => (d == null ? '' : `<svg class="ar" viewBox="-8 -8 16 16" style="transform:rotate(${d + 180}deg)" aria-hidden="true"><path d="M0-6L4 5 0 3-4 5z" fill="currentColor"/></svg>`);
+const wxCache = {};
+let wxSeq = 0, wxFound = [];
+const savedPlace = store.get('ed-place');
+S.sport = !!store.get('ed-sport', false);
+S.place = savedPlace && savedPlace.name && Number.isFinite(savedPlace.lat) && Number.isFinite(savedPlace.lon) ? savedPlace : WX_PLACE;
+S.wxModel = WX_MODELS[store.get('ed-wx-model')] ? store.get('ed-wx-model') : 'icon_eu';
+
+async function wxFetch(p, model) {
+  const key = `${p.lat},${p.lon},${model}`, hit = wxCache[key];
+  if (hit && Date.now() - hit.at < 15 * 60e3) return hit;
+  const q = new URLSearchParams({
+    latitude: p.lat, longitude: p.lon, models: model, wind_speed_unit: 'kn', timezone: 'auto', forecast_days: 1,
+    current: 'temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation',
+    hourly: 'wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation',
+  });
+  const r = await fetch('https://api.open-meteo.com/v1/forecast?' + q);
+  if (!r.ok) throw new Error('Météo indisponible (' + r.status + ')');
+  const j = await r.json();
+  if (!j.current || j.current.temperature_2m == null || j.current.wind_speed_10m == null || !j.hourly || !j.hourly.wind_speed_10m) throw new Error('Données vides pour ' + model);
+  return (wxCache[key] = { j, model, at: Date.now() });
+}
+async function wxGet(p) {
+  let err;
+  for (const m of [S.wxModel, ...Object.keys(WX_MODELS).filter((k) => k !== S.wxModel)]) {
+    try { return await wxFetch(p, m); } catch (e) { err = e; }
+  }
+  throw err;
+}
+const wxLink = (p) => `https://www.windguru.cz/map/?lat=${p.lat.toFixed(4)}&lon=${p.lon.toFixed(4)}&zoom=10`;
+const wxHead = (p) => `<h3><span>Météo · ${esc(p.name)}</span><button type="button" class="link" data-wx="place">Changer</button></h3>`;
+
+function wxChart(h, now) {
+  const W = 300, H = 150, P = { l: 26, r: 6, t: 8, b: 30 }, sp = h.wind_speed_10m, gu = h.wind_gusts_10m, dr = h.wind_direction_10m, n = sp.length;
+  const top = Math.max(10, Math.ceil(Math.max(...sp.filter((v) => v != null), ...gu.filter((v) => v != null)) / 5) * 5);
+  const X = (i) => P.l + (i / (n - 1)) * (W - P.l - P.r), Y = (v) => P.t + (1 - v / top) * (H - P.t - P.b);
+  const line = (a) => a.map((v, i) => (v == null ? '' : `${i === 0 || a[i - 1] == null ? 'M' : 'L'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`)).join('');
+  const mute = 'style="fill:var(--mute)" font-size="10"';
+  const grid = [0, top / 2, top].map((v) => `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" style="stroke:var(--line)"/><text x="${P.l - 4}" y="${(Y(v) + 3).toFixed(1)}" text-anchor="end" ${mute}>${Math.round(v)}</text>`).join('');
+  const ticks = Array.from({ length: Math.floor((n - 1) / 3) + 1 }, (_, k) => k * 3).map((i) => `<text x="${X(i).toFixed(1)}" y="${H - 16}" text-anchor="middle" ${mute}>${String(i).padStart(2, '0')}h</text>${dr[i] == null ? '' : `<g transform="translate(${X(i).toFixed(1)} ${H - 6}) rotate(${dr[i] + 180}) scale(.7)" style="fill:var(--mute)"><path d="M0-6L4 5 0 3-4 5z"/></g>`}`).join('');
+  const nowX = now >= 0 && now < n ? `<line x1="${X(now).toFixed(1)}" x2="${X(now).toFixed(1)}" y1="${P.t}" y2="${H - P.b}" stroke-dasharray="3 3" style="stroke:var(--mute)"/>` : '';
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution du vent sur la journée, en nœuds">${grid}${nowX}<path d="${line(sp)}L${X(n - 1).toFixed(1)},${Y(0).toFixed(1)}L${X(0).toFixed(1)},${Y(0).toFixed(1)}Z" style="fill:var(--accent);fill-opacity:.14;stroke:none"/><path d="${line(sp)}" fill="none" stroke-width="2" style="stroke:var(--accent)"/><path d="${line(gu)}" fill="none" stroke-width="1.5" stroke-dasharray="4 3" style="stroke:var(--blue)"/>${ticks}</svg>`;
+}
+
+function wxHtml(d) {
+  const p = S.place, c = d.j.current, h = d.j.hourly, u = (v) => (v == null ? '–' : Math.round(v)), kmh = (v) => (v == null ? '' : Math.round(v * 1.852) + ' km/h');
+  const rain = h.precipitation.reduce((a, v) => a + (v || 0), 0), now = +c.time.slice(11, 13);
+  const pk = h.wind_speed_10m.reduce((m, v, i, a) => (v > a[m] ? i : m), 0), gmax = Math.max(...h.wind_gusts_10m.filter((v) => v != null));
+  const [name, res] = WX_MODELS[d.model], at = new Date(d.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const cell = (t, v, s) => `<div><small>${t}</small><b class="num">${v}</b><small>${s || ''}</small></div>`;
+  return `${wxHead(p)}
+    <div class="wxmain"><b class="num wxt">${u(c.temperature_2m)}°</b><div><div>${esc(WX_CODE[c.weather_code] || '–')}</div><span class="mute">ressenti ${u(c.apparent_temperature)}°</span></div></div>
+    <div class="wxs">${cell('Vent', u(c.wind_speed_10m) + ' kn', kmh(c.wind_speed_10m))}${cell('Rafales', u(c.wind_gusts_10m) + ' kn', kmh(c.wind_gusts_10m))}${cell('Direction', `${wxArrow(c.wind_direction_10m)} ${wxDir(c.wind_direction_10m)}`, c.wind_direction_10m == null ? '' : Math.round(c.wind_direction_10m) + '°')}${cell('Précipitations', fmt(c.precipitation, 1) + ' mm', fmt(rain, 1) + " mm aujourd'hui")}</div>
+    <div class="mute wxh">Vent sur la journée (nœuds)</div>${wxChart(h, now)}
+    <div class="mute legend"><span><i class="lg" style="background:var(--accent)"></i>Vent</span><span><i class="lg" style="background:var(--blue)"></i>Rafales</span><span>Flèches : sens du vent</span></div>
+    <p class="mute">Pic : ${u(h.wind_speed_10m[pk])} kn vers ${pk} h, rafales jusqu'à ${u(gmax)} kn.</p>
+    <select id="wxm" aria-label="Modèle de prévision">${Object.entries(WX_MODELS).map(([k, [n, r]]) => `<option value="${k}"${k === S.wxModel ? ' selected' : ''}>${n} ${r}</option>`).join('')}</select>
+    <p class="mute wxf">Modèle : ${name} ${res}${d.model !== S.wxModel ? ' (modèle de secours)' : ''} · valeurs de ${esc(c.time.slice(11, 16))} · chargé à ${esc(at)}<br><a class="link" href="${wxLink(p)}" target="_blank" rel="noopener">Voir sur Windguru ↗</a> · données <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a></p>`;
+}
+
+async function wxLoad() {
+  const my = ++wxSeq, put = (html) => { if (my === wxSeq && $('#wx')) $('#wx').innerHTML = html; };
+  put(`${wxHead(S.place)}<p class="mute">Chargement…</p>`);
+  try { put(wxHtml(await wxGet(S.place))); }
+  catch (e) { put(`${wxHead(S.place)}<p class="mute">${esc(e.message || 'Météo indisponible')}</p><a class="link" href="${wxLink(S.place)}" target="_blank" rel="noopener">Voir sur Windguru ↗</a>`); }
+}
+function wxMount(where) {
+  if (!S.sport || S.tab !== where) return;
+  if (where === 'edt') {
+    const card = $('#view>.card'); if (!card) return;
+    const w = document.createElement('div'); w.className = 'sgrid'; card.replaceWith(w); w.append(card);
+    w.insertAdjacentHTML('beforeend', '<aside id="wx" class="panel wx"></aside>');
+  } else {
+    const first = $('.hgrid .panel'); if (!first) return;
+    first.insertAdjacentHTML('afterend', '<div id="wx" class="panel wx"></div>');
+  }
+  wxLoad();
+}
+function wxSetPlace(p) { S.place = p; store.set('ed-place', p); modal.open(false); wxLoad(); }
+function wxPlaceModal() {
+  $('#mtitle').textContent = 'Localisation météo';
+  $('#mbody').innerHTML = '<label for="wxq">Ville</label><input id="wxq" maxlength="80" autocomplete="off" placeholder="Ex. : La Ciotat, Nice, Paris…"><button type="button" id="wxs">Rechercher</button> <button type="button" id="wxd" class="link">Revenir à Marseille</button><div id="wxr"></div><div id="wxe" class="err" role="alert"></div>';
+  modal.open(true);
+  const go = async () => {
+    const q = $('#wxq').value.trim(); if (q.length < 2) return;
+    $('#wxe').textContent = ''; $('#wxr').innerHTML = '<p class="mute">Recherche…</p>';
+    try {
+      const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?' + new URLSearchParams({ name: q, count: 6, language: 'fr', format: 'json' }));
+      if (!r.ok) throw new Error('Recherche indisponible');
+      wxFound = (await r.json()).results || [];
+      $('#wxr').innerHTML = wxFound.length ? wxFound.map((x, i) => `<button type="button" class="wxres" data-k="${i}">${esc(x.name)}<small>${esc([x.admin1, x.country].filter(Boolean).join(', '))}</small></button>`).join('') : '<p class="mute">Aucun résultat.</p>';
+    } catch (e) { $('#wxr').innerHTML = ''; $('#wxe').textContent = e.message || 'Recherche indisponible'; }
+  };
+  $('#wxs').onclick = go;
+  $('#wxq').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+  $('#wxr').onclick = (e) => { const b = e.target.closest('[data-k]'), x = b && wxFound[+b.dataset.k]; if (x) wxSetPlace({ name: x.name, lat: x.latitude, lon: x.longitude }); };
+  $('#wxd').onclick = () => wxSetPlace(WX_PLACE);
+  $('#wxq').focus();
+}
+function syncSport() { $('#sport').setAttribute('aria-pressed', S.sport); $('#sport').title = S.sport ? 'Mode Sportif activé' : 'Mode Sportif'; }
+$('#sport').onclick = () => { S.sport = !S.sport; store.set('ed-sport', S.sport); syncSport(); if (['edt', 'home'].includes(S.tab)) openTab(S.tab); };
+document.addEventListener('click', (e) => { if (e.target.closest('[data-wx=place]')) wxPlaceModal(); });
+document.addEventListener('change', (e) => { if (e.target.id === 'wxm') { S.wxModel = e.target.value; store.set('ed-wx-model', S.wxModel); wxLoad(); } });
+syncSport();
 
 restore();

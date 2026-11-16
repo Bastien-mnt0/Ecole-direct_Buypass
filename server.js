@@ -21,7 +21,7 @@ function record(entry) {
   fs.appendFileSync(path.join(dir, new Date().toISOString().slice(0, 10) + '.jsonl'), JSON.stringify(redact(entry)) + '\n');
 }
 
-async function ed(urlPath, { method = 'POST', token, data, cookies = {} } = {}) {
+async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false } = {}) {
   const jar = { ...cookies };
   const headers = {
     'User-Agent': UA,
@@ -41,6 +41,7 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {} } = {}) 
     const kv = c.split(';')[0], i = kv.indexOf('=');
     jar[kv.slice(0, i).trim()] = kv.slice(i + 1);
   }
+  if (raw) return { res, token: res.headers.get('x-token'), cookies: jar };
   const json = await res.json().catch(() => ({ code: 0, message: 'Réponse invalide' }));
   return { json, token: res.headers.get('x-token'), cookies: jar };
 }
@@ -60,6 +61,20 @@ http.createServer(async (req, res) => {
       const out = await ed(p, { token, data, cookies });
       if (LOG) record({ time: new Date().toISOString(), path: p, request: data, response: out.json });
       return send(res, 200, out);
+    }
+    if (req.method === 'POST' && req.url === '/api/ed-file') {
+      const { id, type, token, cookies } = await readBody(req);
+      if (!/^\d+$/.test(String(id)) || !/^[A-Z_]+$/.test(String(type))) return send(res, 400, { error: 'fichier refusé' });
+      const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${id}&leTypeDeFichier=${type}`, { token, cookies, data: {}, raw: true });
+      const ct = out.res.headers.get('content-type') || '';
+      if (!out.res.ok || ct.includes('json')) {
+        const j = await out.res.json().catch(() => ({}));
+        return send(res, [520, 521, 525].includes(j.code) ? 401 : 404, { error: [520, 521, 525].includes(j.code) ? 'Session expirée' : j.message || 'Fichier indisponible', code: j.code });
+      }
+      const h = { 'Content-Type': ct || 'application/octet-stream' };
+      if (out.token) h['X-Token'] = out.token;
+      res.writeHead(200, h);
+      return res.end(Buffer.from(await out.res.arrayBuffer()));
     }
     if (req.method === 'GET') {
       const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon' };

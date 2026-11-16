@@ -434,10 +434,58 @@ async function hwDay(date) {
 }
 const safeText = (x) => { try { return textOf(b64(x)); } catch { return ''; } };
 // seulement le « travail à faire » (le contenu de séance est ignoré) et les contrôles annoncés
-const todo = (m) => ({ matiere: m.matiere, text: m.aFaire && m.aFaire.contenu ? safeText(m.aFaire.contenu) : '', interro: !!m.interrogation, done: !!(m.aFaire && m.aFaire.effectue) });
+const docsOf = (m) => (m.aFaire && Array.isArray(m.aFaire.documents) ? m.aFaire.documents : []).filter((d) => d && d.id != null).map((d) => ({ id: d.id, type: d.type || 'FICHIER_CDT', name: String(d.libelle || 'Fichier') }));
+const todo = (m) => ({ matiere: m.matiere, text: m.aFaire && m.aFaire.contenu ? safeText(m.aFaire.contenu) : '', interro: !!m.interrogation, done: !!(m.aFaire && m.aFaire.effectue), docs: docsOf(m) });
 const hasWork = (m) => (m.aFaire && m.aFaire.contenu) || m.interrogation;
 const sameSubject = (m, c) => (m.codeMatiere && m.codeMatiere === c.codeMatiere) || norm(m.matiere) === norm(c.matiere || c.text);
-const workHtml = (t) => `<div class="hwi"><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${t.done ? '<span class="tag">fait</span>' : ''}<div>${t.text ? esc(t.text) : '<span class="mute">Contrôle annoncé</span>'}</div></div>`;
+const workHtml = (t) => `<div class="hwi"><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${t.done ? '<span class="tag">fait</span>' : ''}<div>${t.text ? esc(t.text) : '<span class="mute">Contrôle annoncé</span>'}</div>${docsHtml(t.docs)}</div>`;
+const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+const extOf = (n) => { const m = /\.([a-z0-9]{1,5})$/i.exec(n); return m ? m[1].toLowerCase() : ''; };
+const docsHtml = (docs) => !docs || !docs.length ? '' : `<div class="pjs">${docs.map((d) => {
+  const e = extOf(d.name);
+  return `<div class="pj" data-id="${esc(d.id)}" data-type="${esc(d.type)}" data-name="${esc(d.name)}"><span class="pjn">${esc(d.name)}</span><span class="tag">${esc((e || 'fichier').toUpperCase())}</span><span class="pja">${MIME[e] ? '<button type="button" class="pjb" data-act="view">Aperçu</button>' : ''}<button type="button" class="pjb" data-act="dl">Télécharger</button></span><div class="pjm err" role="alert"></div><div class="pjv"></div></div>`;
+}).join('')}</div>`;
+const files = new Map();
+async function fileBlob(d) {
+  const key = d.type + ':' + d.id;
+  if (files.has(key)) return files.get(key);
+  const r = await fetch(PROXY_URL + '/api/ed-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, type: d.type, token: S.token, cookies: S.cookies }) }).catch(() => null);
+  if (!r) throw new Error('Relais injoignable');
+  const t = r.headers.get('X-Token');
+  if (t) { S.token = t; sess.save(); }
+  if (!r.ok) {
+    const o = await r.json().catch(() => ({}));
+    if ([520, 521, 525].includes(o.code)) { sess.clear(); show('login'); $('#loginErr').textContent = 'Session expirée : reconnecte-toi.'; }
+    throw new Error(o.error || 'Fichier indisponible');
+  }
+  const b = await r.blob(), e = extOf(d.name);
+  if (!b.size) throw new Error('Fichier indisponible');
+  const blob = MIME[e] && b.type !== MIME[e] ? new Blob([b], { type: MIME[e] }) : b;
+  const f = { url: URL.createObjectURL(blob), type: blob.type };
+  files.set(key, f);
+  return f;
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.pjb'); if (!b) return;
+  const row = b.closest('.pj'), d = { id: row.dataset.id, type: row.dataset.type, name: row.dataset.name }, msg = row.querySelector('.pjm'), view = row.querySelector('.pjv'), label = b.textContent;
+  msg.textContent = '';
+  if (b.dataset.act === 'view' && view.firstChild) { view.innerHTML = ''; b.textContent = 'Aperçu'; return; }
+  b.disabled = true; b.textContent = 'Chargement…';
+  try {
+    const f = await fileBlob(d);
+    if (b.dataset.act === 'dl') {
+      const ext = Object.entries(MIME).find(([, m]) => m === f.type);
+      const a = Object.assign(document.createElement('a'), { href: f.url, download: extOf(d.name) || !ext ? d.name : d.name + '.' + ext[0] });
+      document.body.appendChild(a); a.click(); a.remove();
+      b.textContent = label;
+    } else if (f.type.startsWith('image/')) {
+      view.innerHTML = `<img src="${f.url}" alt="${esc(d.name)}">`; b.textContent = 'Masquer';
+    } else if (f.type === 'application/pdf') {
+      view.innerHTML = `<iframe src="${f.url}" title="${esc(d.name)}"></iframe>`; b.textContent = 'Masquer';
+    } else { b.textContent = label; msg.textContent = 'Aperçu non disponible pour ce format : télécharge le fichier.'; }
+  } catch (err) { b.textContent = label; msg.textContent = err.message || 'Fichier indisponible'; }
+  b.disabled = false;
+});
 async function loadDevoirs() {
   const h = await hwList();
   const days = Object.keys(h.list).sort().slice(0, 10);

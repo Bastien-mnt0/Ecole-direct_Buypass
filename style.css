@@ -193,3 +193,5 @@ td.r{text-align:right}
 .pjm:empty,.pjv:empty{display:none}
 .pjv img{max-width:100%;border-radius:6px}
 .pjv iframe{width:100%;height:60vh;border:1px solid var(--line);border-radius:6px;background:#fff}
+.blk.st-remplace{box-shadow:inset 0 0 0 2px var(--accent)}
+.blk.st-deplace{box-shadow:inset 0 0 0 2px var(--blue)}

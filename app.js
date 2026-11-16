@@ -493,6 +493,31 @@ async function loadDevoirs() {
   const cards = det.filter(([, l]) => l.length).map(([d, l]) => `<div class="card"><h3 style="text-transform:capitalize">Pour ${esc(longDate(d))}</h3>${l.map(workHtml).join('')}</div>`).join('');
   $('#view').innerHTML = cards || `<div class="card"><p>${NOTHING}</p></div>`;
 }
+// Rapproche cours annulés et remplacements (événements distincts dans l'EDT) : c.st = annule | deplace | remplace, c.from/c.to = cours lié, c.hide = annulé déjà représenté par son remplacement
+const EDT_ST = { annule: 'ANNULÉ', deplace: 'DÉPLACÉ', remplace: 'REMPLACÉ' };
+function edtPrep(list) {
+  const day = (c) => c.start_date.slice(0, 10), ts = (c) => Date.parse(c.start_date.replace(' ', 'T'));
+  const overlap = (a, b) => a.start_date < b.end_date && a.end_date > b.start_date;
+  list.forEach((c) => { delete c.st; delete c.from; delete c.to; delete c.hide; });
+  const live = list.filter((c) => !c.isAnnule);
+  list.filter((c) => c.isAnnule).forEach((c) => {
+    const rep = live.filter((d) => day(d) === day(c) && overlap(c, d));
+    if (rep.length) {
+      c.hide = true;
+      rep.forEach((d) => { d.from = d.from || c; d.st = sameSubject(d, c) && (d.prof || '') === (c.prof || '') && (d.start_date !== c.start_date || d.end_date !== c.end_date) ? 'deplace' : 'remplace'; });
+      return;
+    }
+    const mv = live.filter((d) => d.isModifie && !d.from && sameSubject(d, c)).sort((a, b) => Math.abs(ts(a) - ts(c)) - Math.abs(ts(b) - ts(c)))[0];
+    if (mv) { mv.from = c; mv.st = 'deplace'; c.to = mv; c.st = 'deplace'; } else c.st = 'annule';
+  });
+  return list;
+}
+const edtTag = (c) => (c.st ? EDT_ST[c.st] : c.isAnnule ? EDT_ST.annule : '');
+function edtNote(c) {
+  const o = c.from || c.to; if (!o) return '';
+  const hm = `${o.start_date.slice(11, 16)} - ${o.end_date.slice(11, 16)}`, d = o.start_date.slice(0, 10) === c.start_date.slice(0, 10) ? '' : longDate(o.start_date.slice(0, 10)) + ' ';
+  return c.from ? `au lieu de : ${o.text || o.matiere || ''}${o.prof ? ' · ' + o.prof : ''} (${d}${hm})` : `déplacé : ${longDate(o.start_date.slice(0, 10))} ${hm}`;
+}
 // Pastille sur un cours : rouge « ! » = contrôle, jaune = devoir à faire pour ce cours
 function badge(c) {
   const l = ((S.hw && S.hw.list) || {})[c.start_date.slice(0, 10)], e = (Array.isArray(l) ? l : []).filter((m) => sameSubject(m, c));
@@ -505,7 +530,7 @@ const modal = { open(on) { $('#modal').classList.toggle('show', on); if (on) { m
 async function openCourse(i) {
   const c = (S.edtItems || [])[i]; if (!c) return;
   const date = c.start_date.slice(0, 10), my = (S.mseq = (S.mseq || 0) + 1);
-  const head = `<p class="mute">${esc(longDate(date))} · ${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · <b class="dn">annulé</b>' : ''}<br>${esc(c.prof || '')}${room(c.salle) ? ' · ' + esc(room(c.salle)) : ''}</p>`;
+  const head = `<p class="mute">${esc(longDate(date))} · ${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${edtTag(c) ? ` · <b class="${c.isAnnule ? 'dn' : ''}">${edtTag(c).toLowerCase()}</b>` : ''}<br>${esc(c.prof || '')}${room(c.salle) ? ' · ' + esc(room(c.salle)) : ''}${edtNote(c) ? '<br>' + esc(edtNote(c)) : ''}</p>`;
   $('#mtitle').textContent = c.text || c.matiere || 'Cours';
   $('#mbody').innerHTML = head + '<p class="mute">Chargement…</p>';
   modal.open(true);
@@ -534,7 +559,7 @@ async function loadHome() {
   const notes = (S.notes.notes || []).filter((n) => !S.periode || n.codePeriode === S.periode);
   const day = nextSchoolDay(new Date()), dkey = iso(day), isToday = dkey === iso(new Date());
   const [hw, edt] = await Promise.all([hwList(), api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: dkey, dateFin: dkey, avecTrous: false }).catch(() => null)]);
-  S.edtItems = edt && edt.code === 200 ? edt.data.sort((a, b) => a.start_date.localeCompare(b.start_date)) : [];
+  S.edtItems = edt && edt.code === 200 ? edtPrep(edt.data.sort((a, b) => a.start_date.localeCompare(b.start_date))) : [];
   const gser = [...new Set(notes.map((n) => n.date))].sort().map((d) => general(notes.filter((n) => n.date <= d))).filter((v) => v != null);
   const g = gser.length ? gser[gser.length - 1] : null, cls = toNum(ST.gst && ST.gst[0]);
   const delta = (v) => `<span class="${v >= 0 ? 'up' : 'dn'}">${v >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(v))}</span>`;
@@ -542,8 +567,9 @@ async function loadHome() {
   const nextCtl = entries.find((m) => m.interrogation), nbHw = entries.filter((m) => m.aFaire !== false && !m.interrogation).length;
   const k = (t, v, s) => `<div class="kpi"><small>${t}</small><b>${v}</b><small>${s || ''}</small></div>`;
   const courses = S.edtItems.map((c, i) => {
+    if (c.hide) return '';
     const col = c.isAnnule ? 'var(--mute)' : c.color && inkOn(c.color) === '#fff' ? c.color : 'var(--accent)';
-    return `<div class="hc ${c.isAnnule ? 'off' : ''}" role="button" tabindex="0" data-i="${i}" style="border-left-color:${esc(col)}"><span class="num">${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}</span><span><b>${esc(c.text)}</b><br><span class="mute">${esc(c.prof || '')}${room(c.salle) ? ' · ' + esc(room(c.salle)) : ''}</span></span>${badge(c)}</div>`;
+    return `<div class="hc ${c.isAnnule ? 'off' : ''} ${c.st ? 'st-' + c.st : ''}" role="button" tabindex="0" data-i="${i}" style="border-left-color:${esc(col)}"><span class="num">${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}</span><span><b>${esc(c.text)}</b>${edtTag(c) ? `<span class="tag${c.isAnnule ? ' tag-c' : ''}">${edtTag(c)}</span>` : ''}<br><span class="mute">${esc(c.prof || '')}${room(c.salle) ? ' · ' + esc(room(c.salle)) : ''}${edtNote(c) ? '<br>' + esc(edtNote(c)) : ''}</span></span>${badge(c)}</div>`;
   }).join('') || '<p class="mute">Aucun cours.</p>';
   const days = Object.keys(hw.list).sort().slice(0, 4);
   const det = await Promise.all(days.map(async (d) => [d, (await hwDay(d)).filter(hasWork).map(todo)]));
@@ -588,7 +614,7 @@ async function loadEdt() {
   const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
   const r = await api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: iso(mon), dateFin: iso(sun), avecTrous: false });
   if (r.code !== 200) throw new Error(r.message || "Impossible de charger l'emploi du temps");
-  await hwList(); S.edtItems = r.data;
+  await hwList(); S.edtItems = edtPrep(r.data);
   const min = (t) => +t.slice(11, 13) * 60 + +t.slice(14, 16);
   const H0 = 7, H1 = 20;
   const PX = day ? 80 : 56, today = iso(new Date());
@@ -596,10 +622,10 @@ async function loadEdt() {
   const cols = [...Array(7)].map((_, k) => {
     const d = new Date(mon); d.setDate(mon.getDate() + k); const key = iso(d);
     if (day && key !== focus) return '';
-    const blocks = r.data.filter((c) => c.start_date.slice(0, 10) === key).map((c) => {
+    const blocks = r.data.filter((c) => !c.hide && c.start_date.slice(0, 10) === key).map((c) => {
       const top = ((min(c.start_date) - H0 * 60) / 60) * PX, h = ((min(c.end_date) - min(c.start_date)) / 60) * PX;
       const bg = c.isAnnule ? '#333' : c.color || `hsl(${hue(c.matiere || c.text)} 70% 38%)`;
-      return `<div class="blk" role="button" tabindex="0" data-i="${r.data.indexOf(c)}" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}">${badge(c)}<b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${c.isAnnule ? ' · ANNULÉ' : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${room(c.salle) ? '<br>' + esc(room(c.salle)) : ''}</div>`;
+      return `<div class="blk ${c.st ? 'st-' + c.st : ''}" role="button" tabindex="0" data-i="${r.data.indexOf(c)}" style="top:${top}px;height:${h}px;background:${esc(bg)};color:${inkOn(bg)}">${badge(c)}<b>${esc(c.start_date.slice(11, 16))} - ${esc(c.end_date.slice(11, 16))}${edtTag(c) ? ' · ' + edtTag(c) : ''}</b>${esc(c.text)}<br>${esc(c.prof)}${room(c.salle) ? '<br>' + esc(room(c.salle)) : ''}${edtNote(c) ? '<br><i>' + esc(edtNote(c)) + '</i>' : ''}</div>`;
     }).join('');
     return `<div class="dcol ${key === today ? 'today' : ''}"><div class="dh">${esc(d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }))}</div><div class="dbody" style="height:${(H1 - H0) * PX}px;--px:${PX}px">${blocks}</div></div>`;
   }).join('');

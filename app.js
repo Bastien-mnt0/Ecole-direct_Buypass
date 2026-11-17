@@ -1,6 +1,6 @@
 // Adresse du relais : vide = même origine (node server.js en local).
 // Pour GitHub Pages, mets l'URL de ton Cloudflare Worker, ex. 'https://ed-proxy.xxx.workers.dev'
-const WORKER_URL = 'https://ecole-direct-buypass.didierbleu90.workers.dev';
+const WORKER_URL = 'https://ecole-direct-bypass.didierbleu90.workers.dev';
 const PROXY_URL = ['localhost', '127.0.0.1'].includes(location.hostname) ? '' : WORKER_URL; // en local : serveur node ; en ligne : Worker
 const $ = (s) => document.querySelector(s);
 const S = { cookies: {}, token: null, eleves: [], eleve: null, notes: null, tab: 'notes', week: 0, dayOff: 0, sub: 'eval', edtView: matchMedia('(max-width:760px)').matches ? 'day' : 'week', subjects: [] };
@@ -592,17 +592,17 @@ document.addEventListener('change', (e) => {
   else if (u) hwApply(() => hwPatch(u.closest('.hwi').dataset.key, { urg: u.value }));
 });
 // ---------- Synchronisation avec le cloud personnel École Directe ----------
-// Dossier « BUYPASS » à la racine du cloud, contenant buypass.json : états, urgences et devoirs personnels.
+// Dossier « BYPASS » à la racine du cloud, contenant bypass.json : états, urgences et devoirs personnels.
 // Seules les données de l'app sont lues/écrites ; rien n'est jamais modifié côté devoirs / notes / EDT d'École Directe,
 // et le fichier ne contient ni identifiant, ni mot de passe, ni jeton.
 // Les routes sont regroupées ici : ce sont les seules lignes à ajuster si le cloud École Directe change.
 const CLOUD = {
-  dir: 'BUYPASS', file: 'buypass.json',
+  dir: 'BYPASS', file: 'bypass.json',
   acct: () => S.acc || { id: S.eleve.id, type: 'E' },
   // Copie en corbeille : \\10.0.5.87\CORBEILLE\CLOUD14\cloud\... (adresse du serveur relevée sur le site officiel)
   trash: '\\\\10.0.5.87\\CORBEILLE',
   trashId: (id) => CLOUD.trash + String(id).replace(/^\\\\/, '\\'),
-  // « dest » de l'envoi = chemin du dossier sans le préfixe de serveur (\\CLOUD14\cloud) : \0132038V\E\6616\BUYPASS
+  // « dest » de l'envoi = chemin du dossier sans le préfixe de serveur (\\CLOUD14\cloud) : \0132038V\E\6616\BYPASS
   dest: (id) => String(id).replace(/^\\\\[^\\]+\\cloud(?=\\)/i, '').replace(/^\\\\/, '\\'),
   route: {
     list: (a) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { forceDownload: 0 } }),
@@ -739,7 +739,7 @@ const cloud = {
   },
   async write(a, dir, old, text) {
     if (old && old.libelle !== CLOUD.file) throw new Error('suppression refusée : ce n\'est pas ' + CLOUD.file);
-    if (old) await cloud.call(CLOUD.route.del(a, old)); // le fichier remplacé est toujours buypass.json dans BUYPASS
+    if (old) await cloud.call(CLOUD.route.del(a, old)); // le fichier remplacé est toujours bypass.json dans BYPASS
     const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: CLOUD.dest(dir.id), name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const o = await r.json().catch(() => ({}));
@@ -755,7 +755,7 @@ const cloud = {
     try {
       const a = CLOUD.acct(), ids = S.eleves.map((e) => String(e.id));
       let tree = (await cloud.call(CLOUD.route.list(a))).data, dir = cloud.find(tree, CLOUD.dir, true);
-      if (!dir) { // création automatique du dossier BUYPASS
+      if (!dir) { // création automatique du dossier BYPASS
         const root = cloud.root(tree);
         if (!root) throw new Error('racine du cloud introuvable');
         await cloud.call(CLOUD.route.mkdir(a, CLOUD.dir, root));

@@ -65,6 +65,7 @@ td.r{text-align:right}
 .cf{display:none}
 .sim{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sim input{width:72px;padding:5px}
+#tres{white-space:normal;overflow-wrap:anywhere;flex:1 1 100%;min-width:0}
 .mrow{display:flex;align-items:center;gap:12px;padding:10px 12px;border-top:1px solid var(--line)}
 .mrow.head{justify-content:space-between;background:var(--p2);font-weight:700}
 .mrow i{display:block;font-size:.8rem;color:var(--mute)}

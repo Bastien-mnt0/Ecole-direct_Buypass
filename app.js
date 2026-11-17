@@ -599,11 +599,17 @@ document.addEventListener('change', (e) => {
 const CLOUD = {
   dir: 'BUYPASS', file: 'buypass.json',
   acct: () => S.acc || { id: S.eleve.id, type: 'E' },
+  // Copie en corbeille : \\10.0.5.87\CORBEILLE\CLOUD14\cloud\... (adresse du serveur relevée sur le site officiel)
+  trash: '\\\\10.0.5.87\\CORBEILLE',
+  trashId: (id) => CLOUD.trash + String(id).replace(/^\\\\/, '\\'),
+  // « dest » de l'envoi = chemin du dossier sans le préfixe de serveur (\\CLOUD14\cloud) : \0132038V\E\6616\BUYPASS
+  dest: (id) => String(id).replace(/^\\\\[^\\]+\\cloud(?=\\)/i, '').replace(/^\\\\/, '\\'),
   route: {
     list: (a) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { forceDownload: 0 } }),
     mkdir: (a, name, root) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=post`, data: { parentNode: { ...root, children: [] }, libelle: name, typeRessource: 'folder' } }), // format relevé sur le site officiel
 
-    del: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { nodes: [{ ...node, children: [] }], ids: [node.id] } }), // à confirmer (onglet Réseau, suppression)
+    del: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { tabNodes: [{ ...node, isTrash: false, children: [] }] } }), // 1re suppression : envoi dans la corbeille
+    purge: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { tabNodes: [{ ...node, id: CLOUD.trashId(node.id), isTrash: true, children: [] }] } }), // 2e suppression : vidage de la copie en corbeille
     read: '/api/ed-file',    // relais existant (téléchargement), type de fichier « CLOUD »
     write: '/api/ed-upload', // relais : { parent, name, mime, text } → { json, token, cookies }, comme /api/ed
   },
@@ -732,14 +738,16 @@ const cloud = {
     return r.text();
   },
   async write(a, dir, old, text) {
+    if (old && old.libelle !== CLOUD.file) throw new Error('suppression refusée : ce n\'est pas ' + CLOUD.file);
     if (old) await cloud.call(CLOUD.route.del(a, old)); // le fichier remplacé est toujours buypass.json dans BUYPASS
-    const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: dir.id, name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
+    const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: CLOUD.dest(dir.id), name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const o = await r.json().catch(() => ({}));
     if (o.token) S.token = o.token;
     if (o.cookies) S.cookies = o.cookies;
     sess.save();
     if (!r.ok || o.error || !o.json || o.json.code !== 200) throw new Error(o.error || (o.json && o.json.message) || 'envoi impossible');
+    if (old) { try { await cloud.call(CLOUD.route.purge(a, old)); } catch {} } // l'ancienne version ne reste pas dans la corbeille ; si le vidage échoue, ce n'est pas grave
   },
   async run() {
     if (!S.token || !S.eleve) return;

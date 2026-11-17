@@ -52,7 +52,7 @@ const okFileId = (id, type) => (type === 'CLOUD' ? /^[\p{L}\p{N}_\-./ %\\]{1,300
 // Envoi dans le cloud : uniquement buypass.json (JSON, 200 Ko max) dans un dossier désigné par son id. Pas d'envoi générique.
 const okUpload = (b) => b.name === 'buypass.json' && b.mime === 'application/json' && typeof b.text === 'string' && b.text.length <= 2e5 && /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(b.parent)) && !String(b.parent).includes('..');
 const uploadForm = (b) => { const f = new FormData(); f.append('file', new Blob([b.text], { type: 'application/json' }), b.name); return f; };
-const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=cloud&dossierId=${encodeURIComponent(b.parent)}`; // à vérifier avec l'onglet Réseau du site officiel
+const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(b.parent)}`; // format relevé sur le site officiel (champ multipart : file)
 
 const readBody = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => ok(b ? JSON.parse(b) : {})); });
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };

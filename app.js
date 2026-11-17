@@ -35,7 +35,7 @@ const SESS = 'ed-session';
 const sess = {
   save() {
     if (!S.token || !S.eleve) return;
-    const v = JSON.stringify({ t: S.token, c: S.cookies, e: S.eleves, i: S.eleves.indexOf(S.eleve), s: S.school, a: S.tab, at: Date.now() });
+    const v = JSON.stringify({ t: S.token, c: S.cookies, e: S.eleves, i: S.eleves.indexOf(S.eleve), s: S.school, a: S.tab, ac: S.acc, at: Date.now() });
     try { window[S.keep ? 'localStorage' : 'sessionStorage'].setItem(SESS, v); window[S.keep ? 'sessionStorage' : 'localStorage'].removeItem(SESS); } catch {}
   },
   load() {
@@ -50,12 +50,12 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs'].includes(v.a) ? v.a : 'home' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
   $('#eleve').classList.toggle('hidden', S.eleves.length < 2);
-  setWho(); show('app'); openTab(S.tab);
+  setWho(); show('app'); openTab(S.tab); cloud.push(0);
 }
 async function api(path, data) {
   const r = await fetch(PROXY_URL + '/api/ed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, data, token: S.token, cookies: S.cookies }) });
@@ -100,9 +100,9 @@ async function login(fa = []) {
   const sel = $('#eleve');
   sel.innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   sel.classList.toggle('hidden', S.eleves.length < 2);
-  S.eleve = S.eleves[0]; S.notes = null; S.hist = undefined; S.school = acc.nomEtablissement || ''; setWho();
+  S.eleve = S.eleves[0]; S.notes = null; S.hist = undefined; S.school = acc.nomEtablissement || ''; S.acc = { id: acc.id, type: acc.typeCompte || 'E' }; setWho();
   S.keep = $('#keep').checked; store.set('ed-keep', S.keep); sess.save();
-  show('app'); openTab('home');
+  show('app'); openTab('home'); cloud.push(0);
 }
 
 async function startQcm() {
@@ -144,7 +144,7 @@ $('#qcmGo').onclick = async () => {
     await login([{ cn: r.data.cn, cv: r.data.cv }]);
   } catch (e) { $('#qcmErr').textContent = e.message; }
 };
-$('#logout').onclick = () => { sess.clear(); location.reload(); };
+$('#logout').onclick = async () => { await cloud.flush(); sess.clear(); location.reload(); };
 $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = null; S.hist = undefined; setWho(); sess.save(); openTab(S.tab); };
 
 // ---------- Onglets ----------
@@ -492,7 +492,8 @@ const HW_ST = { todo: 'À faire', doing: 'En cours', done: 'Terminé' };
 const HW_UR = { red: 'Urgent', orange: 'Échéance proche', green: 'À venir' };
 const HW_RANK = { red: 0, orange: 1, green: 2 };
 const HW_SRANK = { todo: 0, doing: 1, done: 2 };
-const hwKey = (k) => `ed-hw-${k}:${S.eleve.id}`;
+const hwKeyFor = (id, k) => `ed-hw-${k}:${id}`;
+const hwKey = (k) => hwKeyFor(S.eleve.id, k);
 const hwHash = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) | 0; return (h >>> 0).toString(36); };
 function hwAuto(date) {
   const d = Math.round((new Date(date + 'T00:00:00') - new Date(iso(new Date()) + 'T00:00:00')) / 864e5);
@@ -536,13 +537,20 @@ async function hwRender() {
   else if (!list.length) body = '<div class="card"><p class="mute">Aucun devoir ne correspond aux filtres.</p></div>';
   else if (f.sort === 'date') body = [...new Set(list.map((e) => e.date))].map((d) => `<div class="card"><h3 style="text-transform:capitalize">Pour ${esc(longDate(d))}</h3>${list.filter((e) => e.date === d).map((e) => hwItem(e, true)).join('')}</div>`).join('');
   else body = `<div class="card">${list.map((e) => hwItem(e, false)).join('')}</div>`;
-  $('#view').innerHTML = bar + body;
+  $('#view').innerHTML = bar + body + '<p class="mute" id="cloudSt"></p>';
+  cloud.paint();
 }
-const loadDevoirs = hwRender;
+const loadDevoirs = async () => { cloud.push(0, true); return hwRender(); };
 const hwApply = (fn) => { fn(); hwRender().catch((e) => { $('#appErr').textContent = e.message; }); };
 function hwPatch(key, patch) {
-  if (key.startsWith('me:')) store.set(hwKey('perso'), store.get(hwKey('perso'), []).map((p) => (p.id === key.slice(3) ? { ...p, ...patch } : p)));
-  else { const s = store.get(hwKey('etat'), {}); s[key] = { ...s[key], ...patch }; store.set(hwKey('etat'), s); }
+  const now = Date.now();
+  if (key.startsWith('me:')) store.set(hwKey('perso'), store.get(hwKey('perso'), []).map((p) => (p.id === key.slice(3) ? { ...p, ...patch, t: now } : p)));
+  else {
+    const s = store.get(hwKey('etat'), {}), e = { ...s[key] };
+    for (const [f, v] of Object.entries(patch)) { e[f] = v; e[f === 'st' ? 'ts' : 'tu'] = now; }
+    s[key] = e; store.set(hwKey('etat'), s);
+  }
+  cloud.push();
 }
 function hwForm(p) {
   const v = { titre: '', matiere: '', desc: '', date: iso(new Date()), urg: 'auto', st: 'todo', ...p };
@@ -555,7 +563,9 @@ function hwForm(p) {
     if (!o.titre || !o.matiere || !/^\d{4}-\d{2}-\d{2}$/.test(o.date)) { $('#hwErr').textContent = "Renseigne l'intitulé, la matière et la date limite."; return; }
     hwApply(() => {
       const l = store.get(hwKey('perso'), []);
-      store.set(hwKey('perso'), p ? l.map((x) => (x.id === p.id ? { ...x, ...o } : x)) : l.concat({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...o }));
+      const t = Date.now();
+      store.set(hwKey('perso'), p ? l.map((x) => (x.id === p.id ? { ...x, ...o, t } : x)) : l.concat({ id: t.toString(36) + Math.random().toString(36).slice(2, 6), ...o, t }));
+      cloud.push();
     });
     modal.open(false);
   };
@@ -569,13 +579,197 @@ document.addEventListener('click', (e) => {
   if (!key) return;
   if (a === 'st') hwApply(() => hwPatch(key, { st: b.dataset.v }));
   else if (a === 'edit') hwForm(store.get(hwKey('perso'), []).find((p) => p.id === key.slice(3)));
-  else if (a === 'del' && confirm('Supprimer ce devoir ?')) hwApply(() => store.set(hwKey('perso'), store.get(hwKey('perso'), []).filter((p) => p.id !== key.slice(3))));
+  else if (a === 'del' && confirm('Supprimer ce devoir ?')) hwApply(() => {
+    const id = key.slice(3), del = store.get(hwKey('del'), {});
+    store.set(hwKey('perso'), store.get(hwKey('perso'), []).filter((p) => p.id !== id));
+    del[id] = Date.now(); store.set(hwKey('del'), del); // pierre tombale : la suppression se propage aux autres appareils
+    cloud.push();
+  });
 });
 document.addEventListener('change', (e) => {
   const f = e.target.closest('[data-hwf]'), u = e.target.closest('[data-hwu]');
   if (f) hwApply(() => store.set('ed-hw-prefs', { ...store.get('ed-hw-prefs', {}), [f.dataset.hwf]: f.value }));
   else if (u) hwApply(() => hwPatch(u.closest('.hwi').dataset.key, { urg: u.value }));
 });
+// ---------- Synchronisation avec le cloud personnel École Directe ----------
+// Dossier « BUYPASS » à la racine du cloud, contenant buypass.json : états, urgences et devoirs personnels.
+// Seules les données de l'app sont lues/écrites ; rien n'est jamais modifié côté devoirs / notes / EDT d'École Directe,
+// et le fichier ne contient ni identifiant, ni mot de passe, ni jeton.
+// Les routes sont regroupées ici : ce sont les seules lignes à ajuster si le cloud École Directe change.
+const CLOUD = {
+  dir: 'BUYPASS', file: 'buypass.json',
+  acct: () => S.acc || { id: S.eleve.id, type: 'E' },
+  route: {
+    list: (a) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { forceDownload: 0 } }),
+    mkdir: (a, name) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=post`, data: { parent: '/', libelle: name } }),
+    del: (a, id) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { ids: [id] } }),
+    read: '/api/ed-file',    // relais existant (téléchargement), type de fichier « CLOUD »
+    write: '/api/ed-upload', // relais : { parent, name, mime, text } → { json, token, cookies }, comme /api/ed
+  },
+};
+const num = (v) => { v = Math.floor(Number(v)); return Number.isFinite(v) && v > 0 ? v : 0; };
+const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((x) => [x, v[x]])) : v));
+const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
+// Tout ce qui vient du cloud est une donnée non fiable : on ne garde que des champs connus, validés.
+function cleanEtat(o) {
+  const out = {};
+  for (const [k, v] of Object.entries(isObj(o) ? o : {})) {
+    if (!k.startsWith('ed:') || k.length > 300 || !isObj(v)) continue;
+    const e = {};
+    if (v.st in HW_ST) { e.st = v.st; e.ts = num(v.ts); }
+    if (v.urg === 'auto' || v.urg in HW_UR) { e.urg = v.urg; e.tu = num(v.tu); }
+    if (Object.keys(e).length) out[k] = e;
+  }
+  return out;
+}
+function cleanPerso(l) {
+  const out = [], seen = new Set();
+  for (const p of Array.isArray(l) ? l : []) {
+    if (!isObj(p) || typeof p.id !== 'string' || !/^[\w-]{1,40}$/.test(p.id) || seen.has(p.id)) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date) || !(p.st in HW_ST) || !(p.urg === 'auto' || p.urg in HW_UR)) continue;
+    seen.add(p.id);
+    out.push({ id: p.id, titre: String(p.titre ?? '').slice(0, 120), matiere: String(p.matiere ?? '').slice(0, 60), desc: String(p.desc ?? '').slice(0, 1000), date: p.date, urg: p.urg, st: p.st, t: num(p.t) });
+  }
+  return out;
+}
+function cleanDel(o) {
+  const out = {}, lim = Date.now() - 180 * 864e5; // les pierres tombales de plus de 6 mois sont oubliées
+  for (const [k, v] of Object.entries(isObj(o) ? o : {})) if (/^[\w-]{1,40}$/.test(k) && num(v) > lim) out[k] = num(v);
+  return out;
+}
+const cleanEleve = (e) => ({ etat: cleanEtat(e?.etat), perso: cleanPerso(e?.perso), del: cleanDel(e?.del) });
+// Conflits : le dernier à avoir modifié gagne, champ par champ pour les états (une urgence changée sur un appareil et un état
+// changé sur un autre sont tous deux conservés) ; égalité d'horodatage = version du cloud. Une suppression plus récente
+// qu'une modification l'emporte (pierre tombale), et inversement.
+function mergeEleve(L, R) {
+  const pick = (a, b, f, tf) => {
+    const A = a && a[f] !== undefined ? [a[f], a[tf]] : null, B = b && b[f] !== undefined ? [b[f], b[tf]] : null;
+    return !A ? B : !B ? A : B[1] >= A[1] ? B : A;
+  };
+  const etat = {};
+  for (const k of new Set([...Object.keys(L.etat), ...Object.keys(R.etat)])) {
+    const e = {}, st = pick(L.etat[k], R.etat[k], 'st', 'ts'), ur = pick(L.etat[k], R.etat[k], 'urg', 'tu');
+    if (st) { e.st = st[0]; e.ts = st[1]; }
+    if (ur) { e.urg = ur[0]; e.tu = ur[1]; }
+    etat[k] = e;
+  }
+  const del = { ...R.del };
+  for (const [k, t] of Object.entries(L.del)) del[k] = Math.max(del[k] || 0, t);
+  const byId = new Map();
+  for (const p of R.perso) byId.set(p.id, p);
+  for (const p of L.perso) { const r = byId.get(p.id); if (!r || p.t > r.t) byId.set(p.id, p); }
+  const perso = [...byId.values()].filter((p) => !(del[p.id] >= p.t && del[p.id] > 0)).sort((a, b) => a.id.localeCompare(b.id));
+  return { etat, perso, del };
+}
+const cloud = {
+  timer: null, cur: null, dirty: false, fails: 0, last: 0, st: null,
+  // push(délai) : planifie une synchro ; soft = ignorée si une synchro a eu lieu il y a moins de 30 s
+  push(delay = 800, soft = false) {
+    if (!S.token || !S.eleve || (soft && Date.now() - cloud.last < 30e3)) return;
+    clearTimeout(cloud.timer);
+    cloud.timer = setTimeout(() => { cloud.timer = null; cloud.sync(); }, delay);
+  },
+  sync() {
+    cloud.dirty = true;
+    return (cloud.cur ||= (async () => {
+      try { while (cloud.dirty) { cloud.dirty = false; await cloud.run(); } } finally { cloud.cur = null; }
+    })());
+  },
+  async flush() {
+    if (!cloud.timer && !cloud.cur) return;
+    clearTimeout(cloud.timer); cloud.timer = null;
+    await Promise.race([cloud.sync(), new Promise((r) => setTimeout(r, 4000))]);
+  },
+  set(state, msg) {
+    cloud.st = { state, msg, at: new Date() };
+    cloud.paint();
+  },
+  paint() {
+    const el = $('#cloudSt'); if (!el || !cloud.st) return;
+    const { state, msg, at } = cloud.st, hm = at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    el.textContent = state === 'sync' ? 'Synchronisation avec le cloud École Directe…'
+      : state === 'ok' ? `Synchronisé avec le cloud École Directe (dossier ${CLOUD.dir}) · ${hm}`
+      : `Cloud indisponible : ${msg}. Tes données restent enregistrées sur cet appareil.`;
+  },
+  // Seules les routes /v3/cloud/ sont autorisées : aucune écriture possible sur le reste d'École Directe.
+  async call({ path, data }) {
+    if (!path.startsWith('/v3/cloud/')) throw new Error('Route non autorisée');
+    const r = await api(path, data);
+    if (r.code !== 200) throw new Error(r.message || 'code ' + r.code);
+    return r;
+  },
+  // Recherche en largeur (le plus proche de la racine d'abord) dans l'arborescence renvoyée par le cloud
+  find(root, name, wantDir) {
+    const isDir = (n) => /^(folder|dossier|dir)$/i.test(n.type || '') || n.isFolder === true || Array.isArray(n.children) || Array.isArray(n.contenu);
+    const q = [root];
+    while (q.length) {
+      const n = q.shift();
+      if (Array.isArray(n)) { q.push(...n); continue; }
+      if (!isObj(n)) continue;
+      if ((n.libelle ?? n.name) === name && isDir(n) === wantDir && n.id != null) return n;
+      for (const v of Object.values(n)) if (v && typeof v === 'object') q.push(v);
+    }
+    return null;
+  },
+  async read(file) {
+    const r = await fetch(PROXY_URL + CLOUD.route.read, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: file.id, type: 'CLOUD', token: S.token, cookies: S.cookies }) }).catch(() => null);
+    if (!r) throw new Error('relais injoignable');
+    const t = r.headers.get('X-Token'); if (t) { S.token = t; sess.save(); }
+    if (!r.ok) throw new Error('lecture du fichier impossible');
+    return r.text();
+  },
+  async write(a, dir, old, text) {
+    if (old) await cloud.call(CLOUD.route.del(a, old.id)); // le fichier remplacé est toujours buypass.json dans BUYPASS
+    const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: dir.id, name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
+    if (!r) throw new Error('relais injoignable');
+    const o = await r.json().catch(() => ({}));
+    if (o.token) S.token = o.token;
+    if (o.cookies) S.cookies = o.cookies;
+    sess.save();
+    if (!r.ok || o.error || !o.json || o.json.code !== 200) throw new Error(o.error || (o.json && o.json.message) || 'envoi impossible');
+  },
+  async run() {
+    if (!S.token || !S.eleve) return;
+    cloud.set('sync');
+    try {
+      const a = CLOUD.acct(), ids = S.eleves.map((e) => String(e.id));
+      let tree = (await cloud.call(CLOUD.route.list(a))).data, dir = cloud.find(tree, CLOUD.dir, true);
+      if (!dir) { // création automatique du dossier BUYPASS
+        await cloud.call(CLOUD.route.mkdir(a, CLOUD.dir));
+        tree = (await cloud.call(CLOUD.route.list(a))).data; dir = cloud.find(tree, CLOUD.dir, true);
+        if (!dir) throw new Error('création du dossier ' + CLOUD.dir + ' impossible');
+      }
+      const file = cloud.find(dir, CLOUD.file, false);
+      let remote = {};
+      if (file) {
+        let o; try { o = JSON.parse(await cloud.read(file)); } catch { throw new Error(CLOUD.file + ' illisible (non écrasé, à vérifier dans le cloud)'); }
+        if (!isObj(o) || !isObj(o.eleves)) throw new Error(CLOUD.file + ' invalide (non écrasé, à vérifier dans le cloud)');
+        for (const [id, e] of Object.entries(o.eleves)) if (/^\d{1,20}$/.test(id)) remote[id] = cleanEleve(e);
+      }
+      const merged = { ...remote };
+      let changed = false;
+      for (const id of ids) {
+        const L = cleanEleve({ etat: store.get(hwKeyFor(id, 'etat'), {}), perso: store.get(hwKeyFor(id, 'perso'), []), del: store.get(hwKeyFor(id, 'del'), {}) });
+        const M = mergeEleve(L, remote[id] || cleanEleve({}));
+        merged[id] = M;
+        // mise à jour locale uniquement si le résultat diffère (évite des écritures et rendus inutiles)
+        for (const k of ['etat', 'perso', 'del']) {
+          if (canon(M[k]) !== canon(L[k])) { store.set(hwKeyFor(id, k), M[k]); changed = true; }
+        }
+      }
+      if (!file || canon(merged) !== canon(remote)) {
+        await cloud.write(a, dir, file, JSON.stringify({ app: CLOUD.dir, v: 1, maj: new Date().toISOString(), eleves: merged }));
+      }
+      cloud.fails = 0; cloud.last = Date.now(); cloud.set('ok');
+      if (changed && S.tab === 'devoirs' && !$('#modal').classList.contains('show')) hwRender().catch(() => {});
+    } catch (e) {
+      cloud.set('err', e.message || 'erreur inconnue');
+      if (++cloud.fails <= 3 && S.token) cloud.push(60e3 * cloud.fails);
+    }
+  },
+};
+document.addEventListener('visibilitychange', () => { if (document.hidden) cloud.flush(); else cloud.push(0, true); });
+addEventListener('online', () => cloud.push(0));
 // Rapproche cours annulés et remplacements (événements distincts dans l'EDT) : c.st = annule | deplace | remplace, c.from/c.to = cours lié, c.hide = annulé déjà représenté par son remplacement
 const EDT_ST = { annule: 'ANNULÉ', deplace: 'DÉPLACÉ', remplace: 'REMPLACÉ' };
 function edtPrep(list) {

@@ -4,7 +4,7 @@ const BASE = 'https://api.ecoledirecte.com';
 const API_VERSION = '4.75.0'; // à ajuster si l'API répond 517
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
-async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false } = {}) {
+async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form } = {}) {
   const jar = { ...cookies };
   const headers = {
     'User-Agent': UA,
@@ -13,12 +13,13 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
     Referer: 'https://www.ecoledirecte.com/',
     Cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '),
   };
+  if (form) delete headers['Content-Type']; // multipart : la bibliothèque fetch ajoute elle-même la frontière
   if (jar.GTK) headers['X-GTK'] = jar.GTK;
   if (token) headers['X-Token'] = token;
   const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${API_VERSION}`, {
     method,
     headers,
-    body: method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined,
+    body: form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
   });
   for (const c of res.headers.getSetCookie?.() || []) {
     const kv = c.split(';')[0], i = kv.indexOf('=');
@@ -28,6 +29,13 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
   const json = await res.json().catch(() => ({ code: 0, message: 'Réponse invalide' }));
   return { json, token: res.headers.get('x-token'), cookies: jar };
 }
+
+// Fichiers : id numérique (cahier de texte) ; pour le cloud (type CLOUD), l'id peut être un chemin (sans « .. »).
+const okFileId = (id, type) => (type === 'CLOUD' ? /^[\w\-./ %]{1,200}$/.test(String(id)) && !String(id).includes('..') : /^\d+$/.test(String(id)));
+// Envoi dans le cloud : uniquement buypass.json (JSON, 200 Ko max) dans un dossier désigné par son id. Pas d'envoi générique.
+const okUpload = (b) => b.name === 'buypass.json' && b.mime === 'application/json' && typeof b.text === 'string' && b.text.length <= 2e5 && /^[\w\-./ %]{1,200}$/.test(String(b.parent)) && !String(b.parent).includes('..');
+const uploadForm = (b) => { const f = new FormData(); f.append('file', new Blob([b.text], { type: 'application/json' }), b.name); return f; };
+const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=cloud&dossierId=${encodeURIComponent(b.parent)}`; // à vérifier avec l'onglet Réseau du site officiel
 
 export default {
   async fetch(req, env) {
@@ -47,10 +55,15 @@ export default {
         if (typeof path !== 'string' || !path.startsWith('/v3/')) return reply({ error: 'chemin refusé' }, 400);
         return reply(await ed(path, { token, data, cookies }));
       }
+      if (req.method === 'POST' && pathname === '/api/ed-upload') {
+        const b = await req.json();
+        if (!okUpload(b)) return reply({ error: 'envoi refusé' }, 400);
+        return reply(await ed(uploadPath(b), { token: b.token, cookies: b.cookies, form: uploadForm(b) }));
+      }
       if (req.method === 'POST' && pathname === '/api/ed-file') {
         const { id, type, token, cookies } = await req.json();
-        if (!/^\d+$/.test(String(id)) || !/^[A-Z_]+$/.test(String(type))) return reply({ error: 'fichier refusé' }, 400);
-        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${id}&leTypeDeFichier=${type}`, { token, cookies, data: {}, raw: true });
+        if (!okFileId(id, type) || !/^[A-Z_]+$/.test(String(type))) return reply({ error: 'fichier refusé' }, 400);
+        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token, cookies, data: {}, raw: true });
         const ct = out.res.headers.get('content-type') || '';
         if (!out.res.ok || ct.includes('json')) {
           const j = await out.res.json().catch(() => ({}));

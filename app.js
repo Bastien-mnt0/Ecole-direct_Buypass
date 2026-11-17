@@ -601,8 +601,9 @@ const CLOUD = {
   acct: () => S.acc || { id: S.eleve.id, type: 'E' },
   route: {
     list: (a) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { forceDownload: 0 } }),
-    mkdir: (a, name) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=post`, data: { parent: '/', libelle: name } }),
-    del: (a, id) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { ids: [id] } }),
+    mkdir: (a, name, root) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=post`, data: { parentNode: { ...root, children: [] }, libelle: name, typeRessource: 'folder' } }), // format relevé sur le site officiel
+
+    del: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { nodes: [{ ...node, children: [] }], ids: [node.id] } }), // à confirmer (onglet Réseau, suppression)
     read: '/api/ed-file',    // relais existant (téléchargement), type de fichier « CLOUD »
     write: '/api/ed-upload', // relais : { parent, name, mime, text } → { json, token, cookies }, comme /api/ed
   },
@@ -711,6 +712,18 @@ const cloud = {
     }
     return null;
   },
+  // Dossier racine (libelle « / ») renvoyé par la liste : parent du dossier à créer
+  root(tree) {
+    const dirs = [], q = [tree];
+    while (q.length) {
+      const n = q.shift();
+      if (Array.isArray(n)) { q.push(...n); continue; }
+      if (!isObj(n)) continue;
+      if (n.id != null && /^(folder|dossier|dir)$/i.test(n.type || '')) dirs.push(n);
+      for (const v of Object.values(n)) if (v && typeof v === 'object') q.push(v);
+    }
+    return dirs.find((n) => n.libelle === '/') || dirs[0] || null;
+  },
   async read(file) {
     const r = await fetch(PROXY_URL + CLOUD.route.read, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: file.id, type: 'CLOUD', token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
@@ -719,7 +732,7 @@ const cloud = {
     return r.text();
   },
   async write(a, dir, old, text) {
-    if (old) await cloud.call(CLOUD.route.del(a, old.id)); // le fichier remplacé est toujours buypass.json dans BUYPASS
+    if (old) await cloud.call(CLOUD.route.del(a, old)); // le fichier remplacé est toujours buypass.json dans BUYPASS
     const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: dir.id, name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const o = await r.json().catch(() => ({}));
@@ -735,7 +748,9 @@ const cloud = {
       const a = CLOUD.acct(), ids = S.eleves.map((e) => String(e.id));
       let tree = (await cloud.call(CLOUD.route.list(a))).data, dir = cloud.find(tree, CLOUD.dir, true);
       if (!dir) { // création automatique du dossier BUYPASS
-        await cloud.call(CLOUD.route.mkdir(a, CLOUD.dir));
+        const root = cloud.root(tree);
+        if (!root) throw new Error('racine du cloud introuvable');
+        await cloud.call(CLOUD.route.mkdir(a, CLOUD.dir, root));
         tree = (await cloud.call(CLOUD.route.list(a))).data; dir = cloud.find(tree, CLOUD.dir, true);
         if (!dir) throw new Error('création du dossier ' + CLOUD.dir + ' impossible');
       }

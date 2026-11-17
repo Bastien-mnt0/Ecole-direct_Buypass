@@ -720,6 +720,7 @@ async function loadEdt() {
   $('#next').onclick = () => { day ? S.dayOff++ : S.week++; openTab('edt'); };
   $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-v="day" aria-selected="${day}">JOUR</button><button data-v="week" aria-selected="${!day}">SEMAINE</button></div>`);
   document.querySelectorAll('.subtabs button').forEach((b) => (b.onclick = () => { S.edtView = b.dataset.v; openTab('edt'); }));
+  S.wxR = day ? { a: focus, b: focus, day: true } : { a: iso(mon), b: iso(sun), day: false };
   wxMount('edt');
 }
 
@@ -728,7 +729,11 @@ addEventListener('scroll', () => $('.top').classList.toggle('scrolled', scrollY 
 
 // ---------- Mode Sportif ----------
 const WX_PLACE = { name: 'Marseille', lat: 43.2965, lon: 5.3698 };
-const WX_MODELS = { icon_eu: ['ICON-EU (DWD)', '≈ 7 km'], ecmwf_ifs: ['ECMWF IFS', '≈ 9 km'], gfs_seamless: ['GFS (NOAA)', '≈ 13 km'] };
+const WX_MODELS = { meteofrance_arome_france_hd: ['AROME France HD (Météo-France)', '≈ 1,5 km'], meteofrance_arome_france: ['AROME France (Météo-France)', '≈ 2,5 km'], icon_eu: ['ICON-EU (DWD)', '≈ 7 km'], ecmwf_ifs: ['ECMWF IFS', '≈ 9 km'], gfs_seamless: ['GFS (NOAA)', '≈ 13 km'] };
+const WX_COMP = 'ecmwf_ifs025';
+const WX_CUR = ['temperature_2m', 'apparent_temperature', 'weather_code', 'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m', 'precipitation', 'cloud_cover'];
+const WX_HR = ['wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m', 'precipitation', 'cloud_cover', 'precipitation_probability'];
+const WX_DAY = ['weather_code', 'temperature_2m_max', 'temperature_2m_min', 'precipitation_sum', 'wind_speed_10m_max', 'wind_gusts_10m_max', 'wind_direction_10m_dominant', 'cloud_cover_mean', 'precipitation_probability_max'];
 const WX_CODE = { 0: 'Ciel dégagé', 1: 'Plutôt dégagé', 2: 'Partiellement nuageux', 3: 'Couvert', 45: 'Brouillard', 48: 'Brouillard givrant', 51: 'Bruine légère', 53: 'Bruine', 55: 'Bruine dense', 56: 'Bruine verglaçante', 57: 'Bruine verglaçante', 61: 'Pluie faible', 63: 'Pluie', 65: 'Pluie forte', 66: 'Pluie verglaçante', 67: 'Pluie verglaçante', 71: 'Neige faible', 73: 'Neige', 75: 'Neige forte', 77: 'Grains de neige', 80: 'Averses faibles', 81: 'Averses', 82: 'Averses violentes', 85: 'Averses de neige', 86: 'Averses de neige', 95: 'Orage', 96: 'Orage et grêle', 99: 'Orage et grêle' };
 const WX_DIR = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
 const wxDir = (d) => (d == null ? '–' : WX_DIR[Math.round(d / 22.5) % 16]);
@@ -738,26 +743,45 @@ let wxSeq = 0, wxFound = [];
 const savedPlace = store.get('ed-place');
 S.sport = !!store.get('ed-sport', false);
 S.place = savedPlace && savedPlace.name && Number.isFinite(savedPlace.lat) && Number.isFinite(savedPlace.lon) ? savedPlace : WX_PLACE;
-S.wxModel = WX_MODELS[store.get('ed-wx-model')] ? store.get('ed-wx-model') : 'icon_eu';
+S.wxModel = WX_MODELS[store.get('ed-wx-model2')] ? store.get('ed-wx-model2') : 'meteofrance_arome_france_hd';
 
-async function wxFetch(p, model) {
-  const key = `${p.lat},${p.lon},${model}`, hit = wxCache[key];
+const wxRange = () => { const t = iso(new Date()); return S.tab === 'edt' && S.wxR ? S.wxR : { a: t, b: t, day: true }; };
+async function wxFetch(p, model, r0) {
+  const lim = new Date(); lim.setDate(lim.getDate() + 15);
+  if (r0.a > iso(lim)) throw new Error('Prévisions disponibles sur 16 jours seulement.');
+  const r = { ...r0, b: r0.b > iso(lim) ? iso(lim) : r0.b };
+  const key = `${p.lat},${p.lon},${model},${r.a},${r.b}`, hit = wxCache[key];
   if (hit && Date.now() - hit.at < 15 * 60e3) return hit;
+  // Un seul appel : le modèle choisi + ECMWF en complément (probabilité de pluie, et jours au-delà de l'horizon d'AROME).
+  // Le courant et l'horaire ne servent que pour la vue « jour » ; la vue semaine n'utilise que le quotidien.
+  const ms = model === WX_COMP ? [model] : [model, WX_COMP], isToday = r.day && r.a === iso(new Date());
   const q = new URLSearchParams({
-    latitude: p.lat, longitude: p.lon, models: model, wind_speed_unit: 'kn', timezone: 'auto', forecast_days: 1,
-    current: 'temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation',
-    hourly: 'wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation',
+    latitude: p.lat, longitude: p.lon, models: ms.join(','), wind_speed_unit: 'kn', timezone: 'auto', start_date: r.a, end_date: r.b,
+    daily: WX_DAY.join(','),
   });
-  const r = await fetch('https://api.open-meteo.com/v1/forecast?' + q);
-  if (!r.ok) throw new Error('Météo indisponible (' + r.status + ')');
-  const j = await r.json();
-  if (!j.current || j.current.temperature_2m == null || j.current.wind_speed_10m == null || !j.hourly || !j.hourly.wind_speed_10m) throw new Error('Données vides pour ' + model);
-  return (wxCache[key] = { j, model, at: Date.now() });
+  if (isToday) q.set('current', WX_CUR.join(','));
+  if (r.day) q.set('hourly', WX_HR.join(','));
+  const res = await fetch('https://api.open-meteo.com/v1/forecast?' + q);
+  if (!res.ok) throw new Error('Météo indisponible (' + res.status + ')');
+  const j = wxMerge(await res.json(), ms, r.day, isToday);
+  if (!(j.daily.time || []).length || j.daily.wind_speed_10m_max[0] == null || (r.day && (!j.hourly.wind_speed_10m || !j.hourly.wind_gusts_10m)) || (isToday && (!j.current || j.current.temperature_2m == null || j.current.wind_speed_10m == null))) throw new Error('Données vides pour ' + model);
+  return (wxCache[key] = { j, model, at: Date.now(), r });
 }
-async function wxGet(p) {
+// Avec plusieurs modèles, Open-Meteo suffixe chaque variable (« wind_speed_10m_<modèle> ») : on prend, valeur par valeur, la première non nulle dans l'ordre des modèles.
+function wxMerge(raw, ms, day, isToday) {
+  const key = (b, v, m) => (ms.length > 1 ? b[`${v}_${m}`] : b[v]);
+  const cols = (b, v) => ms.map((m) => key(b, v, m)).filter(Array.isArray);
+  const arr = (b, v) => { const c = cols(b, v); return c.length ? b.time.map((_, i) => { for (const a of c) if (a[i] != null) return a[i]; return null; }) : null; };
+  const out = { daily: { time: (raw.daily || {}).time || [] }, hourly: null, current: null, fill: false };
+  if (raw.daily) { WX_DAY.forEach((v) => { out.daily[v] = arr(raw.daily, v) || out.daily.time.map(() => null); }); const own = key(raw.daily, 'wind_speed_10m_max', ms[0]); out.fill = ms.length > 1 && Array.isArray(own) && own.some((x) => x == null); }
+  if (day && raw.hourly) { out.hourly = { time: raw.hourly.time }; WX_HR.forEach((v) => { out.hourly[v] = arr(raw.hourly, v) || raw.hourly.time.map(() => null); }); }
+  if (isToday && raw.current) { out.current = { time: raw.current.time }; WX_CUR.forEach((v) => { out.current[v] = ms.map((m) => key(raw.current, v, m)).find((x) => x != null) ?? null; }); }
+  return out;
+}
+async function wxGet(p, r) {
   let err;
   for (const m of [S.wxModel, ...Object.keys(WX_MODELS).filter((k) => k !== S.wxModel)]) {
-    try { return await wxFetch(p, m); } catch (e) { err = e; }
+    try { return await wxFetch(p, m, r); } catch (e) { err = e; }
   }
   throw err;
 }
@@ -777,25 +801,44 @@ function wxChart(h, now) {
 }
 
 function wxHtml(d) {
-  const p = S.place, c = d.j.current, h = d.j.hourly, u = (v) => (v == null ? '–' : Math.round(v)), kmh = (v) => (v == null ? '' : Math.round(v * 1.852) + ' km/h');
-  const rain = h.precipitation.reduce((a, v) => a + (v || 0), 0), now = +c.time.slice(11, 13);
-  const pk = h.wind_speed_10m.reduce((m, v, i, a) => (v > a[m] ? i : m), 0), gmax = Math.max(...h.wind_gusts_10m.filter((v) => v != null));
+  const p = S.place, j = d.j, c = j.current, h = j.hourly, dl = j.daily, u = (v) => (v == null ? '–' : Math.round(v)), kmh = (v) => (v == null ? '' : Math.round(v * 1.852) + ' km/h');
   const [name, res] = WX_MODELS[d.model], at = new Date(d.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const hasProb = (h ? h.precipitation_probability : dl.precipitation_probability_max).some((v) => v != null);
+  const foot = (info) => `<select id="wxm" aria-label="Modèle de prévision">${Object.entries(WX_MODELS).map(([k, [n, r]]) => `<option value="${k}"${k === S.wxModel ? ' selected' : ''}>${n} ${r}</option>`).join('')}</select>
+    <p class="mute wxf">Modèle : ${name} ${res}${d.model !== S.wxModel ? ' (modèle de secours)' : ''}${j.fill ? ' · complété par ECMWF IFS au-delà de l\'horizon du modèle (≈ 48 h)' : ''}${hasProb ? ' · probabilités de pluie : ensemble ECMWF' : ''} · ${info} · chargé à ${esc(at)}<br><a class="link" href="${wxLink(p)}" target="_blank" rel="noopener">Voir sur Windguru ↗</a> · données <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a></p>`;
+  if (!d.r.day) {
+    const rows = dl.time.map((t, i) => `<div class="hrow"><span><b style="text-transform:capitalize">${esc(new Date(t + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }))}</b><br><span class="mute">${esc(WX_CODE[dl.weather_code[i]] || '–')}</span></span><span style="text-align:right"><b class="num">${u(dl.temperature_2m_min[i])}° / ${u(dl.temperature_2m_max[i])}°</b><br><span class="mute">${fmt(dl.precipitation_sum[i], 1)} mm${dl.precipitation_probability_max[i] != null ? ` (${u(dl.precipitation_probability_max[i])} %)` : ''} · ${u(dl.wind_speed_10m_max[i])} kn (raf. ${u(dl.wind_gusts_10m_max[i])}) ${wxArrow(dl.wind_direction_10m_dominant[i])} ${wxDir(dl.wind_direction_10m_dominant[i])}${dl.cloud_cover_mean[i] != null ? ` · ☁ ${u(dl.cloud_cover_mean[i])} %` : ''}</span></span></div>`).join('');
+    return `${wxHead(p)}${rows}<p class="mute wxh">Min / max · cumul de pluie (probabilité max) · vent max en nœuds · ☁ couverture nuageuse moyenne</p>${foot('semaine du ' + esc(longDate(d.r.a)))}`;
+  }
+  const today = d.r.a === iso(new Date());
+  const rain = h.precipitation.reduce((a, v) => a + (v || 0), 0), now = today ? +c.time.slice(11, 13) : -1;
+  const pk = h.wind_speed_10m.reduce((m, v, i, a) => (v > a[m] ? i : m), 0), gmax = Math.max(...h.wind_gusts_10m.filter((v) => v != null));
+  const pmax = Math.max(...h.precipitation.filter((v) => v != null), 0), ph = h.precipitation.indexOf(pmax);
+  const inten = pmax < 0.1 ? 'Aucune' : pmax < 2.5 ? 'Faible' : pmax < 7.6 ? 'Modérée' : 'Forte';
+  const probs = h.precipitation_probability.filter((v) => v != null), prob = probs.length ? Math.max(...probs) : null;
+  const cl = (v) => (v < 20 ? 'dégagé' : v < 50 ? 'peu nuageux' : v < 80 ? 'nuageux' : 'couvert');
+  const cc = today ? c.cloud_cover : dl.cloud_cover_mean[0];
+  const k = today
+    ? { t: c.temperature_2m, code: c.weather_code, sub: 'ressenti ' + u(c.apparent_temperature) + '°', w: c.wind_speed_10m, g: c.wind_gusts_10m, dir: c.wind_direction_10m, prs: 'en ce moment : ' + fmt(c.precipitation, 1) + ' mm', wl: 'Vent', gl: 'Rafales' }
+    : { t: dl.temperature_2m_max[0], code: dl.weather_code[0], sub: 'min ' + u(dl.temperature_2m_min[0]) + '°', w: dl.wind_speed_10m_max[0], g: dl.wind_gusts_10m_max[0], dir: dl.wind_direction_10m_dominant[0], prs: 'sur la journée', wl: 'Vent max', gl: 'Rafales max' };
   const cell = (t, v, s) => `<div><small>${t}</small><b class="num">${v}</b><small>${s || ''}</small></div>`;
+  const rainCells = cell('Pluie du jour', fmt(rain, 1) + ' mm', k.prs)
+    + (prob != null ? cell('Probabilité de pluie', u(prob) + ' %', 'maximum de la journée') : '')
+    + cell('Intensité', inten, pmax >= 0.1 ? `pic ${fmt(pmax, 1)} mm/h vers ${ph} h` : '')
+    + (cc != null ? cell('Nuages', u(cc) + ' %', cl(cc) + (today ? '' : ' (moyenne)')) : '');
   return `${wxHead(p)}
-    <div class="wxmain"><b class="num wxt">${u(c.temperature_2m)}°</b><div><div>${esc(WX_CODE[c.weather_code] || '–')}</div><span class="mute">ressenti ${u(c.apparent_temperature)}°</span></div></div>
-    <div class="wxs">${cell('Vent', u(c.wind_speed_10m) + ' kn', kmh(c.wind_speed_10m))}${cell('Rafales', u(c.wind_gusts_10m) + ' kn', kmh(c.wind_gusts_10m))}${cell('Direction', `${wxArrow(c.wind_direction_10m)} ${wxDir(c.wind_direction_10m)}`, c.wind_direction_10m == null ? '' : Math.round(c.wind_direction_10m) + '°')}${cell('Précipitations', fmt(c.precipitation, 1) + ' mm', fmt(rain, 1) + " mm aujourd'hui")}</div>
+    <div class="wxmain"><b class="num wxt">${u(k.t)}°</b><div><div>${esc(WX_CODE[k.code] || '–')}</div><span class="mute">${k.sub}</span></div></div>
+    <div class="wxs">${cell(k.wl, u(k.w) + ' kn', kmh(k.w))}${cell(k.gl, u(k.g) + ' kn', kmh(k.g))}${cell('Direction', `${wxArrow(k.dir)} ${wxDir(k.dir)}`, k.dir == null ? '' : Math.round(k.dir) + '°')}${rainCells}</div>
     <div class="mute wxh">Vent sur la journée (nœuds)</div>${wxChart(h, now)}
     <div class="mute legend"><span><i class="lg" style="background:var(--accent)"></i>Vent</span><span><i class="lg" style="background:var(--blue)"></i>Rafales</span><span>Flèches : sens du vent</span></div>
     <p class="mute">Pic : ${u(h.wind_speed_10m[pk])} kn vers ${pk} h, rafales jusqu'à ${u(gmax)} kn.</p>
-    <select id="wxm" aria-label="Modèle de prévision">${Object.entries(WX_MODELS).map(([k, [n, r]]) => `<option value="${k}"${k === S.wxModel ? ' selected' : ''}>${n} ${r}</option>`).join('')}</select>
-    <p class="mute wxf">Modèle : ${name} ${res}${d.model !== S.wxModel ? ' (modèle de secours)' : ''} · valeurs de ${esc(c.time.slice(11, 16))} · chargé à ${esc(at)}<br><a class="link" href="${wxLink(p)}" target="_blank" rel="noopener">Voir sur Windguru ↗</a> · données <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a></p>`;
+    ${foot(today ? 'valeurs de ' + esc(c.time.slice(11, 16)) : 'prévisions du ' + esc(longDate(d.r.a)))}`;
 }
 
 async function wxLoad() {
   const my = ++wxSeq, put = (html) => { if (my === wxSeq && $('#wx')) $('#wx').innerHTML = html; };
   put(`${wxHead(S.place)}<p class="mute">Chargement…</p>`);
-  try { put(wxHtml(await wxGet(S.place))); }
+  try { put(wxHtml(await wxGet(S.place, wxRange()))); }
   catch (e) { put(`${wxHead(S.place)}<p class="mute">${esc(e.message || 'Météo indisponible')}</p><a class="link" href="${wxLink(S.place)}" target="_blank" rel="noopener">Voir sur Windguru ↗</a>`); }
 }
 function wxMount(where) {
@@ -834,7 +877,7 @@ function wxPlaceModal() {
 function syncSport() { $('#sport').setAttribute('aria-pressed', S.sport); $('#sport').title = S.sport ? 'Mode Sportif activé' : 'Mode Sportif'; }
 $('#sport').onclick = () => { S.sport = !S.sport; store.set('ed-sport', S.sport); syncSport(); if (['edt', 'home'].includes(S.tab)) openTab(S.tab); };
 document.addEventListener('click', (e) => { if (e.target.closest('[data-wx=place]')) wxPlaceModal(); });
-document.addEventListener('change', (e) => { if (e.target.id === 'wxm') { S.wxModel = e.target.value; store.set('ed-wx-model', S.wxModel); wxLoad(); } });
+document.addEventListener('change', (e) => { if (e.target.id === 'wxm') { S.wxModel = e.target.value; store.set('ed-wx-model2', S.wxModel); wxLoad(); } });
 syncSport();
 
 restore();

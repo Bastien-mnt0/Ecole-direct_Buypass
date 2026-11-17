@@ -232,4 +232,12 @@ a.link{display:inline-block;text-decoration:none}
 .lg{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .wxres{display:block;width:100%;margin:6px 0 0;background:var(--p2);color:var(--ink);border:1px solid var(--line);text-align:left;font-weight:600}
 .wxres small{display:block;color:var(--mute);font-weight:400}
-@media (max-width:760px){.sgrid{grid-template-columns:1fr}.sgrid>.wx{order:-1;position:static;margin-top:10px}.sgrid>.card{padding:8px;margin-top:10px}}
+@media (max-width:760px){.sgrid{grid-template-columns:1fr}.sgrid>.wx{position:static;margin-top:0;padding:10px 12px}.sgrid>.card{padding:8px;margin-top:10px}
+ .wx h3{font-size:.85rem;margin-bottom:4px}
+ .wxmain{gap:10px;margin:2px 0 8px}
+ .wxt{font-size:1.8rem}
+ .wxs{gap:6px}
+ .wxs>div{padding:6px 8px}
+ .wxs b{font-size:1rem}
+ .wxh{margin:8px 0 0}
+ .wxf{margin-top:6px}}.wxs>div:last-child:nth-child(odd){grid-column:1/-1}

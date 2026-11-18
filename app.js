@@ -592,17 +592,17 @@ document.addEventListener('change', (e) => {
   else if (u) hwApply(() => hwPatch(u.closest('.hwi').dataset.key, { urg: u.value }));
 });
 // ---------- Synchronisation avec le cloud personnel École Directe ----------
-// Dossier « EDUNOVA » à la racine du cloud, contenant edunova.json : états, urgences et devoirs personnels.
+// Dossier « EDUNOTA » à la racine du cloud, contenant edunota.json : états, urgences et devoirs personnels.
 // Seules les données de l'app sont lues/écrites ; rien n'est jamais modifié côté devoirs / notes / EDT d'École Directe,
 // et le fichier ne contient ni identifiant, ni mot de passe, ni jeton.
 // Les routes sont regroupées ici : ce sont les seules lignes à ajuster si le cloud École Directe change.
 const CLOUD = {
-  dir: 'EDUNOVA', file: 'edunova.json',
+  dir: 'EDUNOTA', file: 'edunota.json',
   acct: () => S.acc || { id: S.eleve.id, type: 'E' },
   // Copie en corbeille : \\10.0.5.87\CORBEILLE\CLOUD14\cloud\... (adresse du serveur relevée sur le site officiel)
   trash: '\\\\10.0.5.87\\CORBEILLE',
   trashId: (id) => CLOUD.trash + String(id).replace(/^\\\\/, '\\'),
-  // « dest » de l'envoi = chemin du dossier sans le préfixe de serveur (\\CLOUD14\cloud) : \0132038V\E\6616\EDUNOVA  
+  // « dest » de l'envoi = chemin du dossier sans le préfixe de serveur (\\CLOUD14\cloud) : \0132038V\E\6616\EDUNOTA  
   dest: (id) => String(id).replace(/^\\\\[^\\]+\\cloud(?=\\)/i, '').replace(/^\\\\/, '\\'),
   route: {
     list: (a) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { forceDownload: 0 } }),

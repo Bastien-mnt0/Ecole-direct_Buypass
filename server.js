@@ -1,5 +1,5 @@
 // Serveur local sans dépendance (Node 18+) : node server.js
-// Sert public/index.html (page d'accueil EDUNOVA ; l'application École Directe est sur /ecoledirecte.html) et relaie les appels vers api.ecoledirecte.com (le navigateur ne peut pas les faire : CORS).
+// Sert public/index.html (page d'accueil EDUNOTA ; l'application École Directe est sur /ecoledirecte.html) et relaie les appels vers api.ecoledirecte.com (le navigateur ne peut pas les faire : CORS).
 // Sans état : les cookies font l'aller-retour avec le navigateur (utilisable par plusieurs sessions).
 const http = require('http');
 const fs = require('fs');
@@ -49,8 +49,8 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
 
 // Fichiers : id numérique (cahier de texte) ; pour le cloud (type CLOUD), l'id peut être un chemin (sans « .. »).
 const okFileId = (id, type) => (type === 'CLOUD' ? /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(id)) && !String(id).includes('..') : /^\d+$/.test(String(id)));
-// Envoi dans le cloud : uniquement edunova.json (JSON, 200 Ko max) dans un dossier désigné par son id. Pas d'envoi générique.
-const okUpload = (b) => b.name === 'edunova.json' && b.mime === 'application/json' && typeof b.text === 'string' && b.text.length <= 2e5 && /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(b.parent)) && !String(b.parent).includes('..');
+// Envoi dans le cloud : uniquement edunota.json (JSON, 200 Ko max) dans un dossier désigné par son id. Pas d'envoi générique.
+const okUpload = (b) => b.name === 'edunota.json' && b.mime === 'application/json' && typeof b.text === 'string' && b.text.length <= 2e5 && /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(b.parent)) && !String(b.parent).includes('..');
 const uploadForm = (b) => { const f = new FormData(); f.append('file', new Blob([b.text], { type: 'application/json' }), b.name); return f; };
 const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(b.parent)}`; // format relevé sur le site officiel (champ multipart : file)
 
@@ -97,4 +97,4 @@ http.createServer(async (req, res) => {
     }
     send(res, 404, { error: 'introuvable' });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
-}).listen(PORT, '127.0.0.1', () => console.log(`EDUNOVA : http://localhost:${PORT}`));
+}).listen(PORT, '127.0.0.1', () => console.log(`EDUNOTA : http://localhost:${PORT}`));

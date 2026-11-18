@@ -1,4 +1,4 @@
-# EDUNOVA
+# EDUNOTA
 
 Plateforme scolaire non officielle qui regroupe plusieurs environnements scolaires dans une seule interface.
 
@@ -12,9 +12,9 @@ Pour École Directe : notes avec moyennes recalculées en direct (nouvelles note
 ## Structure du projet
 ```
 public/
-  index.html     page d'accueil EDUNOVA (choix de l'environnement)
-  edunova.css
-  edunova.js     registre des environnements (tableau PLATFORMS)
+  index.html     page d'accueil EDUNOTA (choix de l'environnement)
+  edunota.css
+  edunota.js     registre des environnements (tableau PLATFORMS)
   ecoledirecte.html   application École Directe (ancien index.html, contenu inchangé)
   app.js, style.css
   logo-dark.png, logo-light.png, favicon.ico, icon-192.png, apple-touch-icon.png
@@ -26,14 +26,14 @@ worker.js        même relais, version Cloudflare Worker
 ```
 node server.js
 ```
-puis ouvre http://localhost:3000 (Node 18 ou plus). La page d'accueil EDUNOVA s'affiche ; la carte **École Directe** ouvre l'application (`/ecoledirecte.html`).
+puis ouvre http://localhost:3000 (Node 18 ou plus). La page d'accueil EDUNOTA s'affiche ; la carte **École Directe** ouvre l'application (`/ecoledirecte.html`).
 
 ## Sur GitHub Pages
 GitHub Pages n'héberge que des fichiers statiques : l'API d'EcoleDirecte bloque les appels directs depuis un navigateur (CORS), il faut donc un petit relais. Le plus simple et gratuit : un Cloudflare Worker.
 
 1. Crée un dépôt GitHub et envoie le projet :
    ```
-   git init && git add . && git commit -m "EDUNOVA"
+   git init && git add . && git commit -m "EDUNOTA"
    git branch -M main
    git remote add origin https://github.com/TON-PSEUDO/TON-DEPOT.git
    git push -u origin main
@@ -47,10 +47,10 @@ GitHub Pages n'héberge que des fichiers statiques : l'API d'EcoleDirecte bloque
    Dans `wrangler.toml`, mets ton adresse GitHub Pages dans `ALLOWED_ORIGIN` (ex. `https://TON-PSEUDO.github.io`), puis `wrangler deploy`. Note l'URL affichée (`https://ed-proxy.xxx.workers.dev`).
 4. Dans `public/app.js`, renseigne `WORKER_URL` avec cette URL, puis commit et push.
 
-Sur GitHub Pages, l'adresse racine (`https://TON-PSEUDO.github.io/TON-DEPOT/`) ouvre la page d'accueil EDUNOVA. Le Worker ne sert aucune page : il relaie uniquement les appels à l'API.
+Sur GitHub Pages, l'adresse racine (`https://TON-PSEUDO.github.io/TON-DEPOT/`) ouvre la page d'accueil EDUNOTA. Le Worker ne sert aucune page : il relaie uniquement les appels à l'API.
 
 ## Ajouter Pronote plus tard
-Les cartes de la page d'accueil sont générées depuis le tableau `PLATFORMS` de `edunova.js`. Pour activer Pronote : passer son `status` de `'soon'` à `'available'` et renseigner son `href` (page d'entrée de son application). Un nouvel environnement s'ajoute de la même façon, avec une entrée de plus dans le tableau.
+Les cartes de la page d'accueil sont générées depuis le tableau `PLATFORMS` de `edunota.js`. Pour activer Pronote : passer son `status` de `'soon'` à `'available'` et renseigner son `href` (page d'entrée de son application). Un nouvel environnement s'ajoute de la même façon, avec une entrée de plus dans le tableau.
 
 ## À savoir
 - Tes identifiants passent par ton Worker pour aller chez EcoleDirecte : n'en donne pas l'accès à d'autres personnes. Ils ne sont jamais enregistrés (seul l'identifiant peut être mémorisé sur l'appareil, jamais le mot de passe).

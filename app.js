@@ -981,12 +981,21 @@ async function wxFetch(p, model, r0) {
   const res = await fetch('https://api.open-meteo.com/v1/forecast?' + q);
   if (!res.ok) throw new Error('Météo indisponible (' + res.status + ')');
   const j = wxMerge(await res.json(), ms, r.day, isToday);
-  if (!(j.daily.time || []).length || j.daily.wind_speed_10m_max[0] == null || (r.day && (!j.hourly.wind_speed_10m || !j.hourly.wind_gusts_10m)) || (isToday && (!j.current || j.current.temperature_2m == null || j.current.wind_speed_10m == null))) throw new Error('Données vides pour ' + model);
+  const curOk = (c) => !!c && c.temperature_2m != null && c.wind_speed_10m != null;
+  // Le bloc « current » est parfois vide avec plusieurs modèles : on le redemande seul, avec le modèle choisi uniquement.
+  if (isToday && !curOk(j.current)) {
+    try {
+      const rc = await fetch('https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({ latitude: p.lat, longitude: p.lon, models: model, wind_speed_unit: 'kn', timezone: 'auto', current: WX_CUR.join(',') }));
+      if (rc.ok) { const c2 = wxMerge({ current: (await rc.json()).current }, [model], false, true).current; if (curOk(c2)) j.current = c2; }
+    } catch (e) { /* repli sur le quotidien ci-dessous */ }
+  }
+  // Le « current » n'est plus bloquant : s'il manque, la vue du jour retombe sur les valeurs quotidiennes.
+  if (!(j.daily.time || []).length || j.daily.wind_speed_10m_max[0] == null || (r.day && (!j.hourly.wind_speed_10m || !j.hourly.wind_gusts_10m))) throw new Error('Données vides pour ' + model);
   return (wxCache[key] = { j, model, at: Date.now(), r });
 }
 // Avec plusieurs modèles, Open-Meteo suffixe chaque variable (« wind_speed_10m_<modèle> ») : on prend, valeur par valeur, la première non nulle dans l'ordre des modèles.
 function wxMerge(raw, ms, day, isToday) {
-  const key = (b, v, m) => (ms.length > 1 ? b[`${v}_${m}`] : b[v]);
+  const key = (b, v, m) => (ms.length > 1 ? (b[`${v}_${m}`] ?? b[v]) : b[v]);
   const cols = (b, v) => ms.map((m) => key(b, v, m)).filter(Array.isArray);
   const arr = (b, v) => { const c = cols(b, v); return c.length ? b.time.map((_, i) => { for (const a of c) if (a[i] != null) return a[i]; return null; }) : null; };
   const out = { daily: { time: (raw.daily || {}).time || [] }, hourly: null, current: null, fill: false };
@@ -1027,29 +1036,29 @@ function wxHtml(d) {
     const rows = dl.time.map((t, i) => `<div class="hrow"><span><b style="text-transform:capitalize">${esc(new Date(t + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }))}</b><br><span class="mute">${esc(WX_CODE[dl.weather_code[i]] || '–')}</span></span><span style="text-align:right"><b class="num">${u(dl.temperature_2m_min[i])}° / ${u(dl.temperature_2m_max[i])}°</b><br><span class="mute">${fmt(dl.precipitation_sum[i], 1)} mm${dl.precipitation_probability_max[i] != null ? ` (${u(dl.precipitation_probability_max[i])} %)` : ''} · ${u(dl.wind_speed_10m_max[i])} kn (raf. ${u(dl.wind_gusts_10m_max[i])}) ${wxArrow(dl.wind_direction_10m_dominant[i])} ${wxDir(dl.wind_direction_10m_dominant[i])}${dl.cloud_cover_mean[i] != null ? ` · ☁ ${u(dl.cloud_cover_mean[i])} %` : ''}</span></span></div>`).join('');
     return `${wxHead(p)}${rows}<p class="mute wxh">Min / max · cumul de pluie (probabilité max) · vent max en nœuds · ☁ couverture nuageuse moyenne</p>${foot('semaine du ' + esc(longDate(d.r.a)))}`;
   }
-  const today = d.r.a === iso(new Date());
-  const rain = h.precipitation.reduce((a, v) => a + (v || 0), 0), now = today ? +c.time.slice(11, 13) : -1;
+  const today = d.r.a === iso(new Date()), live = today && !!c && c.temperature_2m != null && c.wind_speed_10m != null;
+  const rain = h.precipitation.reduce((a, v) => a + (v || 0), 0), now = today ? (c && c.time ? +c.time.slice(11, 13) : new Date().getHours()) : -1;
   const pk = h.wind_speed_10m.reduce((m, v, i, a) => (v > a[m] ? i : m), 0), gmax = Math.max(...h.wind_gusts_10m.filter((v) => v != null));
   const pmax = Math.max(...h.precipitation.filter((v) => v != null), 0), ph = h.precipitation.indexOf(pmax);
   const inten = pmax < 0.1 ? 'Aucune' : pmax < 2.5 ? 'Faible' : pmax < 7.6 ? 'Modérée' : 'Forte';
   const probs = h.precipitation_probability.filter((v) => v != null), prob = probs.length ? Math.max(...probs) : null;
   const cl = (v) => (v < 20 ? 'dégagé' : v < 50 ? 'peu nuageux' : v < 80 ? 'nuageux' : 'couvert');
-  const cc = today ? c.cloud_cover : dl.cloud_cover_mean[0];
-  const k = today
+  const cc = live ? c.cloud_cover : dl.cloud_cover_mean[0];
+  const k = live
     ? { t: c.temperature_2m, code: c.weather_code, sub: 'ressenti ' + u(c.apparent_temperature) + '°', w: c.wind_speed_10m, g: c.wind_gusts_10m, dir: c.wind_direction_10m, prs: 'en ce moment : ' + fmt(c.precipitation, 1) + ' mm', wl: 'Vent', gl: 'Rafales' }
     : { t: dl.temperature_2m_max[0], code: dl.weather_code[0], sub: 'min ' + u(dl.temperature_2m_min[0]) + '°', w: dl.wind_speed_10m_max[0], g: dl.wind_gusts_10m_max[0], dir: dl.wind_direction_10m_dominant[0], prs: 'sur la journée', wl: 'Vent max', gl: 'Rafales max' };
   const cell = (t, v, s) => `<div><small>${t}</small><b class="num">${v}</b><small>${s || ''}</small></div>`;
   const rainCells = cell('Pluie du jour', fmt(rain, 1) + ' mm', k.prs)
     + (prob != null ? cell('Probabilité de pluie', u(prob) + ' %', 'maximum de la journée') : '')
     + cell('Intensité', inten, pmax >= 0.1 ? `pic ${fmt(pmax, 1)} mm/h vers ${ph} h` : '')
-    + (cc != null ? cell('Nuages', u(cc) + ' %', cl(cc) + (today ? '' : ' (moyenne)')) : '');
+    + (cc != null ? cell('Nuages', u(cc) + ' %', cl(cc) + (live ? '' : ' (moyenne)')) : '');
   return `${wxHead(p)}
     <div class="wxmain"><b class="num wxt">${u(k.t)}°</b><div><div>${esc(WX_CODE[k.code] || '–')}</div><span class="mute">${k.sub}</span></div></div>
     <div class="wxs">${cell(k.wl, u(k.w) + ' kn', kmh(k.w))}${cell(k.gl, u(k.g) + ' kn', kmh(k.g))}${cell('Direction', `${wxArrow(k.dir)} ${wxDir(k.dir)}`, k.dir == null ? '' : Math.round(k.dir) + '°')}${rainCells}</div>
     <div class="mute wxh">Vent sur la journée (nœuds)</div>${wxChart(h, now)}
     <div class="mute legend"><span><i class="lg" style="background:var(--accent)"></i>Vent</span><span><i class="lg" style="background:var(--blue)"></i>Rafales</span><span>Flèches : sens du vent</span></div>
     <p class="mute">Pic : ${u(h.wind_speed_10m[pk])} kn vers ${pk} h, rafales jusqu'à ${u(gmax)} kn.</p>
-    ${foot(today ? 'valeurs de ' + esc(c.time.slice(11, 16)) : 'prévisions du ' + esc(longDate(d.r.a)))}`;
+    ${foot(live ? 'valeurs de ' + esc(c.time.slice(11, 16)) : 'prévisions du ' + esc(longDate(d.r.a)))}`;
 }
 
 async function wxLoad() {

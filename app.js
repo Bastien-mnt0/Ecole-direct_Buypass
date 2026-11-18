@@ -1,6 +1,6 @@
 // Adresse du relais : vide = même origine (node server.js en local).
 // Pour GitHub Pages, mets l'URL de ton Cloudflare Worker, ex. 'https://ed-proxy.xxx.workers.dev'
-const WORKER_URL = 'https://ecole-direct-bypass.didierbleu90.workers.dev';
+const WORKER_URL = 'https://edunota.didierbleu90.workers.dev';
 const PROXY_URL = ['localhost', '127.0.0.1'].includes(location.hostname) ? '' : WORKER_URL; // en local : serveur node ; en ligne : Worker
 const $ = (s) => document.querySelector(s);
 const S = { cookies: {}, token: null, eleves: [], eleve: null, notes: null, tab: 'notes', week: 0, dayOff: 0, sub: 'eval', edtView: matchMedia('(max-width:760px)').matches ? 'day' : 'week', subjects: [] };

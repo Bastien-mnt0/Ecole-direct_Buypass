@@ -50,7 +50,7 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs'].includes(v.a) ? v.a : 'home' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs', 'messages'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
@@ -150,11 +150,11 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 // ---------- Onglets ----------
 function openTab(name) {
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', cloud: 'Cloud' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', cloud: 'Cloud' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -1149,6 +1149,78 @@ async function ensureNotes() {
   if (r.code !== 200) throw new Error(r.message || 'Impossible de charger les notes');
   S.notes = r.data; S.periode = undefined;
 }
+// ---------- Messagerie École Directe ----------
+// Lecture seule (reçus, envoyés, archivés). Le contenu des messages est une donnée non fiable : il est nettoyé avant affichage.
+const MSG = { box: 'received', list: [], unread: 0 };
+const MSG_BOX = { received: 'Reçus', sent: 'Envoyés', archived: 'Archivés' };
+const msgBase = () => { const a = CLOUD.acct(); return a.type === 'E' ? `/v3/eleves/${S.eleve.id}` : `/v3/familles/${a.id}`; };
+async function msgFetch(box) {
+  const r = await api(`${msgBase()}/messages.awp?force=false&typeRecuperation=${box}&idClasseur=0&orderBy=date&order=desc&query=&onlyRead=&page=0&itemsPerPage=100&getAll=0&verbe=get`, { anneeMessages: '' });
+  if (r.code !== 200) throw new Error(r.message || 'Messagerie indisponible (code ' + r.code + ')');
+  const d = r.data || {}, list = Array.isArray((d.messages || {})[box]) ? d.messages[box] : [];
+  const unread = box === 'received' ? (Number.isFinite(+(d.pagination || {}).messagesRecusNotReadCount) ? +d.pagination.messagesRecusNotReadCount : list.filter((m) => m.read === false).length) : 0;
+  return { list, unread };
+}
+const msgWho = (m, box) => {
+  const n = (x) => (x && (x.name || [x.civilite, x.prenom, x.nom].filter(Boolean).join(' '))) || '';
+  if (box === 'sent' || box === 'draft') { const to = (Array.isArray(m.to) ? m.to : Array.isArray(m.to_cc_cci) ? m.to_cc_cci : []).map(n).filter(Boolean); return to.length ? 'À : ' + to.join(', ') : '(destinataires)'; }
+  return n(m.from) || 'Expéditeur inconnu';
+};
+const msgDate = (d) => { const t = new Date(String(d || '').replace(' ', 'T')); return Number.isNaN(+t) ? '' : t.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + t.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
+const msgRow = (m, box) => {
+  const unread = box === 'received' && m.read === false;
+  return `<div class="hrow" role="button" tabindex="0" data-m="${esc(m.id)}" data-box="${esc(box)}" style="cursor:pointer"><span><b${unread ? '' : ' style="font-weight:500"'}>${esc(m.subject || '(sans objet)')}</b>${unread ? '<span class="tag">non lu</span>' : ''}<br><span class="mute">${esc(msgWho(m, box))}${m.files && m.files.length ? ' · 📎' : ''}</span></span><span class="mute" style="text-align:right">${esc(msgDate(m.date))}</span></div>`;
+};
+// Nettoyage du HTML d'un message : liste blanche de balises, seul href (http, https, mailto) est conservé
+function msgClean(html) {
+  const ok = new Set(['P', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'UL', 'OL', 'LI', 'A', 'DIV', 'SPAN', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'HR']);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const out = document.createElement('div');
+  const walk = (src, dst) => {
+    for (const n of [...src.childNodes]) {
+      if (n.nodeType === 3) { dst.appendChild(document.createTextNode(n.nodeValue)); continue; }
+      if (n.nodeType !== 1) continue;
+      const t = n.tagName;
+      if (['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'FORM', 'IMG', 'SVG', 'VIDEO', 'AUDIO'].includes(t)) continue;
+      if (!ok.has(t)) { walk(n, dst); continue; }
+      const e = document.createElement(t.toLowerCase());
+      if (t === 'A') { const h = (n.getAttribute('href') || '').trim(); if (/^(https?:|mailto:)/i.test(h)) { e.setAttribute('href', h); e.target = '_blank'; e.rel = 'noopener noreferrer'; } }
+      walk(n, e); dst.appendChild(e);
+    }
+  };
+  walk(doc.body, out);
+  return out.innerHTML;
+}
+async function msgOpen(id, box) {
+  $('#mtitle').textContent = 'Message';
+  $('#mbody').innerHTML = '<p class="mute">Chargement…</p>';
+  modal.open(true);
+  try {
+    const r = await api(`${msgBase()}/messages/${encodeURIComponent(id)}.awp?verbe=get&mode=${box === 'sent' ? 'expediteur' : 'destinataire'}`, { anneeMessages: '' });
+    if (r.code !== 200) throw new Error(r.message || 'Message indisponible (code ' + r.code + ')');
+    const m = r.data || {};
+    let body = ''; try { body = msgClean(b64(m.content || '')); } catch { body = '<p class="mute">Contenu illisible.</p>'; }
+    const docs = (Array.isArray(m.files) ? m.files : []).filter((f) => f && f.id != null).map((f) => ({ id: f.id, type: 'PIECE_JOINTE', name: String(f.libelle || f.name || 'fichier') }));
+    $('#mtitle').textContent = m.subject || '(sans objet)';
+    $('#mbody').innerHTML = `<p class="mute">${esc(msgWho(m, box))} · ${esc(msgDate(m.date))}</p><div class="msgb">${body || '<span class="mute">Message vide.</span>'}</div>${docsHtml(docs)}`;
+    const it = MSG.list.find((x) => String(x.id) === String(id));
+    if (it && it.read === false) { it.read = true; MSG.unread = Math.max(0, MSG.unread - 1); if (S.tab === 'messages') msgPaint(); }
+  } catch (e) { if (!(e && e.message === 'Session expirée')) $('#mbody').innerHTML = `<div class="err" role="alert">${esc(e.message)}</div>`; else modal.open(false); }
+}
+function msgPaint() {
+  const tabs = Object.entries(MSG_BOX).map(([k, v]) => `<button type="button" class="pjb" data-mb="${k}"${k === MSG.box ? ' aria-pressed="true" style="font-weight:700"' : ''}>${v}${k === 'received' && MSG.unread ? ` (${MSG.unread})` : ''}</button>`).join('');
+  $('#view').innerHTML = `<div class="card"><div class="sim">${tabs}</div></div><div class="card">${MSG.list.length ? MSG.list.map((m) => msgRow(m, MSG.box)).join('') : '<p class="mute">Aucun message.</p>'}</div>`;
+}
+async function loadMessages() {
+  const r = await msgFetch(MSG.box);
+  MSG.list = r.list; MSG.unread = MSG.box === 'received' ? r.unread : MSG.unread;
+  if (S.tab === 'messages') msgPaint();
+}
+document.addEventListener('click', (e) => {
+  const mb = e.target.closest('[data-mb]'); if (mb) { MSG.box = mb.dataset.mb; $('#view').innerHTML = '<p class="mute">Chargement…</p>'; loadMessages().catch((err) => { $('#view').innerHTML = ''; $('#appErr').textContent = err.message; }); return; }
+  const m = e.target.closest('[data-m]'); if (m) msgOpen(m.dataset.m, m.dataset.box || 'received');
+});
+document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-m]')) { e.preventDefault(); msgOpen(e.target.dataset.m, e.target.dataset.box || 'received'); } });
 async function loadHome() {
   await ensureNotes();
   const periodes = (S.notes.periodes || []).filter((p) => !p.annuel);
@@ -1156,7 +1228,8 @@ async function loadHome() {
   ST = structure();
   const notes = (S.notes.notes || []).filter((n) => !S.periode || n.codePeriode === S.periode);
   const day = nextSchoolDay(new Date()), dkey = iso(day), isToday = dkey === iso(new Date());
-  const [hw, edt] = await Promise.all([hwList(), api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: dkey, dateFin: dkey, avecTrous: false }).catch(() => null)]);
+  const [hw, edt, mrec] = await Promise.all([hwList(), api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: dkey, dateFin: dkey, avecTrous: false }).catch(() => null), msgFetch('received').catch(() => null)]);
+  if (mrec) { MSG.box = 'received'; MSG.list = mrec.list; MSG.unread = mrec.unread; }
   S.edtItems = edt && edt.code === 200 ? edtPrep(edt.data.sort((a, b) => a.start_date.localeCompare(b.start_date))) : [];
   const gser = [...new Set(notes.map((n) => n.date))].sort().map((d) => general(notes.filter((n) => n.date <= d))).filter((v) => v != null);
   const g = gser.length ? gser[gser.length - 1] : null, cls = toNum(ST.gst && ST.gst[0]);
@@ -1184,6 +1257,7 @@ async function loadHome() {
       <div class="panel"><h3>${isToday ? "Aujourd'hui" : 'Prochain jour de cours : ' + esc(longDate(dkey))}</h3>${courses}<button class="link" data-go="edt">Emploi du temps →</button></div>
       <div class="panel"><h3>À faire</h3>${work}<button class="link" data-go="devoirs">Cahier de texte →</button></div>
       <div class="panel"><h3>Dernières notes</h3>${last}<button class="link" data-go="notes">Toutes les notes →</button></div>
+      <div class="panel"><h3>Messagerie${mrec && mrec.unread ? ` <span class="tag">${mrec.unread} non lu${mrec.unread > 1 ? 's' : ''}</span>` : ''}</h3>${mrec ? (mrec.list.slice(0, 5).map((m) => msgRow(m, 'received')).join('') || '<p class="mute">Aucun message.</p>') : '<p class="mute">Messagerie indisponible.</p>'}<button class="link" data-go="messages">Messagerie →</button></div>
       <div class="panel"><h3>Évolution de la moyenne</h3>${chart(gser, [], { label: 'Moyenne générale' })}<button class="link" data-go="dash">Analyse et prévisions →</button></div>
     </div>`;
   wxMount('home');

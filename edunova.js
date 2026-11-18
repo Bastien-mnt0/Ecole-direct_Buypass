@@ -10,7 +10,7 @@ const PLATFORMS = [
     name: 'École Directe',
     desc: 'Notes, analyse, emploi du temps et cahier de texte.',
     status: 'available',
-    href: 'index.html',
+    href: 'ecoledirecte.html',
     cta: 'Accéder',
     logo: 'ED',
   },

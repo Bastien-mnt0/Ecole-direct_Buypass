@@ -1,5 +1,5 @@
 // Serveur local sans dépendance (Node 18+) : node server.js
-// Sert public/edunova.html (page d'accueil EDUNOVA ; l'application École Directe reste sur /index.html) et relaie les appels vers api.ecoledirecte.com (le navigateur ne peut pas les faire : CORS).
+// Sert public/index.html (page d'accueil EDUNOVA ; l'application École Directe est sur /ecoledirecte.html) et relaie les appels vers api.ecoledirecte.com (le navigateur ne peut pas les faire : CORS).
 // Sans état : les cookies font l'aller-retour avec le navigateur (utilisable par plusieurs sessions).
 const http = require('http');
 const fs = require('fs');
@@ -91,7 +91,7 @@ http.createServer(async (req, res) => {
     }
     if (req.method === 'GET') {
       const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon' };
-      const p = new URL(req.url, 'http://x').pathname, name = p === '/' ? 'edunova.html' : path.basename(p), file = path.join(__dirname, 'public', name);
+      const p = new URL(req.url, 'http://x').pathname, name = p === '/' ? 'index.html' : path.basename(p), file = path.join(__dirname, 'public', name);
       if (!types[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, 'introuvable', 'text/plain');
       return send(res, 200, fs.readFileSync(file), types[path.extname(name)]);
     }

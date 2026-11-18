@@ -3,53 +3,128 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ecole Directe_v2</title>
-<link rel="icon" href="favicon.ico?v=1" sizes="any">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=1">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=1">
+<title>EDUNOVA — Tes espaces scolaires, réunis</title>
+<meta name="description" content="EDUNOVA regroupe tes environnements scolaires dans une seule plateforme claire : notes, analyse, emploi du temps et cahier de texte.">
+<link rel="icon" href="favicon.ico?v=2" sizes="any">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=2">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
 <meta name="theme-color" content="#0b0e11">
-<link rel="stylesheet" href="style.css?v=17">
+<script>
+/* Applique le thème avant le rendu (même clé que l'application : ed-theme) */
+(function(){var t;try{t=JSON.parse(localStorage.getItem('ed-theme'))}catch(e){}
+if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+document.documentElement.dataset.theme=t})();
+</script>
+<link rel="stylesheet" href="edunova.css?v=1">
 </head>
 <body>
-<header class="top"><button id="burger" class="burger" aria-label="Menu" aria-expanded="false" aria-controls="side"><i></i><i></i><i></i></button><span id="school"></span><span class="grow"></span><select id="eleve" class="hidden" aria-label="Élève"></select><button id="sport" class="icon hidden" aria-label="Mode Sportif" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.6 4.6A2 2 0 1 1 11 8H2m10.6 11.4A2 2 0 1 0 14 16H2m15.7-8.3A2.5 2.5 0 1 1 19.5 12H2"/></svg></button><button id="theme" class="icon" aria-label="Changer de thème">◐</button><span id="who" class="pill hidden"></span><button id="logout" class="logout hidden">Déconnexion</button></header>
-<div id="scrim" class="scrim"></div>
-<div class="layout">
-<nav id="side" class="side hidden" aria-label="Navigation"><div class="brand">CARNET</div>
-  <button data-tab="home" aria-selected="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg><span>Accueil</span></button>
-  <button data-tab="dash" aria-selected="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-6 4 3 8-9"/><path d="M3 21h18"/></svg><span>Analyse</span></button>
-  <button data-tab="notes" aria-selected="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h12"/><text x="12" y="9" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">18</text><text x="12" y="20" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">20</text></svg><span>Notes</span></button>
-  <button data-tab="edt" aria-selected="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Emploi du temps</span></button>
-  <button data-tab="devoirs" aria-selected="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M8 16h11"/></svg><span>Cahier de texte</span></button>
-</nav>
-<main>
-  <section id="login" class="card">
-    <label for="id">Identifiant EcoleDirecte</label>
-    <input id="id" autocomplete="username">
-    <label for="pw">Mot de passe</label>
-    <div class="pwrap"><input id="pw" type="password" autocomplete="current-password"><button type="button" id="eye" class="eye" aria-label="Afficher le mot de passe" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-    <label class="keep"><input type="checkbox" id="keep"> Rester connecté sur cet appareil</label>
-    <button id="go">Se connecter</button>
-    <div id="loginErr" class="err" role="alert"></div>
-    <p class="mute">Tes identifiants ne quittent pas ton ordinateur, sauf vers EcoleDirecte. Seul l'identifiant est mémorisé, jamais le mot de passe.</p>
+
+<header class="nav">
+  <a class="logo" href="#top" aria-label="EDUNOVA, accueil"><img class="lg lg-dark" src="logo-dark.png" alt=""><img class="lg lg-light" src="logo-light.png" alt="">EDUNOVA</a>
+  <nav class="links" aria-label="Sections">
+    <a href="#objectif">Objectif</a>
+    <a href="#fonctionnalites">Fonctionnalités</a>
+    <a href="#avantages">Avantages</a>
+    <a href="#choix">Espaces</a>
+  </nav>
+  <button id="theme" class="ghost" aria-label="Changer de thème">◐</button>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="herologo"><img class="lg lg-dark" src="logo-dark.png" alt="Logo EDUNOVA"><img class="lg lg-light" src="logo-light.png" alt="Logo EDUNOVA"></div>
+    <p class="eyebrow">Plateforme scolaire</p>
+    <h1>Tout ton scolaire,<br><span class="accent">un seul espace.</span></h1>
+    <p class="lead">EDUNOVA réunit tes environnements scolaires dans une interface unique, rapide et lisible. Tes notes, ton emploi du temps et tes devoirs, enfin au même endroit.</p>
+    <div class="cta">
+      <a class="btn primary" href="#choix">Choisir mon espace</a>
+      <a class="btn" href="#fonctionnalites">Découvrir</a>
+    </div>
+    <ul class="stats" aria-label="Points clés">
+      <li><b>2</b><span>environnements, dont 1 déjà actif</span></li>
+      <li><b>5</b><span>outils pour suivre ta scolarité</span></li>
+      <li><b>0</b><span>mot de passe mémorisé</span></li>
+    </ul>
   </section>
 
-  <section id="qcm" class="card hidden">
-    <h2 id="question" style="font-size:1.05rem"></h2>
-    <label for="choix">Ta réponse</label>
-    <select id="choix"></select>
-    <button id="qcmGo">Valider</button>
-    <div id="qcmErr" class="err" role="alert"></div>
+  <section id="choix" class="section">
+    <div class="head">
+      <p class="eyebrow">Commencer</p>
+      <h2>Choisis ton espace</h2>
+      <p class="sub">Sélectionne l'environnement scolaire que tu utilises.</p>
+    </div>
+    <div id="platforms" class="platforms"></div>
   </section>
 
-  <section id="app" class="hidden">
-    <h1 id="ptitle" class="ptitle"></h1>
-    <div id="view"></div>
-    <div id="appErr" class="err" role="alert"></div>
+  <section id="objectif" class="section">
+    <div class="head">
+      <p class="eyebrow">Objectif</p>
+      <h2>Une vue d'ensemble, pas dix onglets</h2>
+    </div>
+    <div class="split">
+      <p>Les outils scolaires sont souvent dispersés, lents et difficiles à lire. EDUNOVA part d'un constat simple : un élève doit comprendre sa situation en quelques secondes.</p>
+      <p>La plateforme se connecte à ton espace existant, puis présente tes données de façon claire, analysée et agréable à consulter, sur ordinateur comme sur mobile.</p>
+    </div>
   </section>
+
+  <section id="fonctionnalites" class="section">
+    <div class="head">
+      <p class="eyebrow">Fonctionnalités</p>
+      <h2>Ce que tu peux faire</h2>
+    </div>
+    <div class="grid">
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+        <h3>Accueil</h3><p>Un résumé de ta situation : dernières notes, prochains cours et devoirs à venir.</p>
+      </article>
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 8-9"/><path d="M3 21h18"/></svg>
+        <h3>Analyse</h3><p>Moyennes, évolution et tendances par matière pour voir où tu progresses.</p>
+      </article>
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11h12"/><text x="12" y="9" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">18</text><text x="12" y="20" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">20</text></svg>
+        <h3>Notes</h3><p>Toutes tes évaluations par période, avec le détail de chaque matière.</p>
+      </article>
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+        <h3>Emploi du temps</h3><p>Ta semaine en un coup d'œil, avec les cours à venir.</p>
+      </article>
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M8 16h11"/></svg>
+        <h3>Cahier de texte</h3><p>Devoirs et contenus de séances, classés et faciles à retrouver.</p>
+      </article>
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.6 4.6A2 2 0 1 1 11 8H2m10.6 11.4A2 2 0 1 0 14 16H2m15.7-8.3A2.5 2.5 0 1 1 19.5 12H2"/></svg>
+        <h3>Mode sportif</h3><p>Affiche la météo pour savoir quoi prévoir avant tes activités en extérieur.</p>
+      </article>
+      <article class="feat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>
+        <h3>Thème clair et sombre</h3><p>Une interface qui s'adapte à ta préférence, de jour comme de nuit.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="avantages" class="section">
+    <div class="head">
+      <p class="eyebrow">Avantages</p>
+      <h2>Pensé pour être simple et sûr</h2>
+    </div>
+    <div class="grid two">
+      <article class="adv"><h3>Respect de ta vie privée</h3><p>Tes identifiants ne sont envoyés qu'à ton espace scolaire. Seul l'identifiant peut être mémorisé, jamais le mot de passe.</p></article>
+      <article class="adv"><h3>Clair et rapide</h3><p>Une interface sobre qui va à l'essentiel, sans surcharge visuelle.</p></article>
+      <article class="adv"><h3>Partout avec toi</h3><p>Adapté aux ordinateurs, tablettes et téléphones.</p></article>
+      <article class="adv"><h3>Prêt à s'étendre</h3><p>EDUNOVA est conçu comme une plateforme : de nouveaux environnements scolaires pourront s'y ajouter.</p></article>
+    </div>
+  </section>
+
 </main>
-</div>
 
-<div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle"><div class="mbox"><button type="button" class="mclose" aria-label="Fermer">×</button><h3 id="mtitle"></h3><div id="mbody"></div></div></div>
-<script src="app.js?v=18"></script>
+<footer class="foot">
+  <span class="logo"><img class="lg lg-dark" src="logo-dark.png" alt=""><img class="lg lg-light" src="logo-light.png" alt="">EDUNOVA</span>
+  <p>Projet indépendant, non affilié à EcoleDirecte ni à Pronote. Les noms cités appartiennent à leurs propriétaires respectifs.</p>
+</footer>
+
+<script src="edunova.js?v=1"></script>
 </body>
 </html>

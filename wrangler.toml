@@ -1,3 +1,4 @@
+# EDUNOVA : relais Cloudflare vers l'API École Directe (aucune page servie).
 name = "ed-proxy"
 main = "worker.js"
 compatibility_date = "2026-01-01"

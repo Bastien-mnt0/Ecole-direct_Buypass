@@ -1,4 +1,4 @@
-// Cloudflare Worker : même rôle que server.js, hébergé gratuitement.
+// EDUNOVA — Cloudflare Worker : même rôle que server.js (relais API uniquement, il ne sert aucune page), hébergé gratuitement.
 // Il n'accepte que les requêtes venant de ALLOWED_ORIGIN (ton site GitHub Pages).
 const BASE = 'https://api.ecoledirecte.com';
 const API_VERSION = '4.75.0'; // à ajuster si l'API répond 517

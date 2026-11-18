@@ -235,6 +235,7 @@ async function loadNotes() {
 
 const ICON = '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 21h18"/><path d="M6 17v-5M10 17V8M14 17v-6M18 17V6"/></svg>';
 function renderNotes() {
+  S.evList = [];
   const periodes = (S.notes.periodes || []).filter((p) => !p.annuel);
   if (S.periode === undefined) S.periode = (periodes.find((p) => !p.cloture) || {}).codePeriode || '';
   const notes = (S.notes.notes || []).filter((n) => !S.periode || n.codePeriode === S.periode);
@@ -247,7 +248,7 @@ function renderNotes() {
   const g = general(notes);
   const ptabs = periodes.map((p) => `<button class="ptab" data-p="${esc(p.codePeriode)}" aria-selected="${p.codePeriode === S.periode}">${esc(p.periode)}</button>`).join('') + `<button class="ptab" data-p="" aria-selected="${!S.periode}">Année</button>`;
   const opts = ['<option value="">Toute l\'année</option>'].concat(periodes.map((p) => `<option value="${esc(p.codePeriode)}" ${p.codePeriode === S.periode ? 'selected' : ''}>${esc(p.periode)}</option>`)).join('');
-  const ev = (n, isNew) => `<span class="ev ${isNew ? 'new' : ''} ${sig(n) ? '' : 'ns'}">${sig(n) ? esc(n.valeur) : '(' + esc(n.valeur) + ')'}${(toNum(n.noteSur) || 20) !== 20 ? `<sub> /${esc(n.noteSur)}</sub>` : ''}${(toNum(n.coef) || 1) !== 1 ? `<sup> (${esc(n.coef)})</sup>` : ''}</span>`;
+  const ev = (n, isNew) => `<span class="ev ${isNew ? 'new' : ''} ${sig(n) ? '' : 'ns'}" role="button" tabindex="0" data-n="${evRef(n)}" title="Détail de l'évaluation">${sig(n) ? esc(n.valeur) : '(' + esc(n.valeur) + ')'}${(toNum(n.noteSur) || 20) !== 20 ? `<sub> /${esc(n.noteSur)}</sub>` : ''}${(toNum(n.coef) || 1) !== 1 ? `<sup> (${esc(n.coef)})</sup>` : ''}</span>`;
   const rows = order.map((o) => {
     if (o.head) return `<tr class="grp"><td>${esc(/^moyenne/i.test(o.head.name) ? o.head.name : 'Moyenne ' + o.head.name)}</td><td class="c-coef"></td><td class="c-avg">${fmt(general(notes, undefined, new Set(o.head.codes)))}</td><td class="c-ev"></td><td class="c-x"></td></tr>`;
     const x = byCode[o.code] || { code: o.code, notes: [], avg: null, i: -1 };
@@ -841,6 +842,29 @@ async function openCourse(i) {
 $('.mclose').onclick = () => modal.open(false);
 $('#modal').onclick = (e) => { if (e.target === $('#modal')) modal.open(false); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#modal').classList.contains('show')) modal.open(false); });
+// Détail d'une évaluation (clic sur une note, comme sur EcoleDirecte)
+function evRef(n) { return (S.evList ||= []).push(n) - 1; }
+function openEval(i) {
+  const n = (S.evList || [])[i]; if (!n) return;
+  const line = (k, v) => `<p style="margin:4px 0"><b>${k} :</b> ${v}</p>`;
+  const date = String(n.date || '').slice(0, 10);
+  const d = date ? new Date(date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const sur = toNum(n.noteSur) && toNum(n.noteSur) !== 20 ? ` / ${esc(n.noteSur)}` : '';
+  const cl = [toNum(n.moyenneClasse), toNum(n.minClasse), toNum(n.maxClasse)];
+  const f2 = (v) => (v == null ? '–' : v.toFixed(2).replace('.', ','));
+  $('#mtitle').textContent = 'Détail de l\'évaluation';
+  $('#mbody').innerHTML = `<div class="ndet"><div class="ntitle">${esc(n.devoir || n.libelleMatiere || 'Évaluation')}</div>`
+    + (n.libelleMatiere && n.devoir ? `<p class="mute" style="margin:2px 0 8px">${esc(n.libelleMatiere)}</p>` : '')
+    + (n.typeDevoir ? line('Type d\'évaluation', esc(n.typeDevoir)) : '')
+    + (d ? line('Date', esc(d)) : '')
+    + line('Note de l\'élève', esc(n.valeur ?? '') + sur + (toNum(n.coef) && toNum(n.coef) !== 1 ? ` <span class="mute">(coef ${esc(String(n.coef).replace('.', ','))})</span>` : ''))
+    + (cl.some((v) => v != null) ? line('Moyenne de la classe', `${f2(cl[0])} , Min : ${f2(cl[1])} , Max : ${f2(cl[2])}`) : '')
+    + (n.commentaire ? line('Commentaire', esc(n.commentaire)) : '')
+    + '</div>';
+  modal.open(true);
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-n]'); if (b) openEval(+b.dataset.n); });
+document.addEventListener('keydown', (e) => { const b = e.target.closest && e.target.closest('[data-n]'); if (b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openEval(+b.dataset.n); } });
 document.addEventListener('click', (e) => { const b = e.target.closest('.blk,.hc'); if (b) openCourse(+b.dataset.i); });
 document.addEventListener('keydown', (e) => { const b = e.target.closest && e.target.closest('.blk,.hc'); if (b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openCourse(+b.dataset.i); } });
 
@@ -874,8 +898,9 @@ async function loadHome() {
   const days = Object.keys(hw.list).sort().slice(0, 4);
   const det = await Promise.all(days.map(async (d) => [d, (await hwDay(d)).filter(hasWork).map(todo)]));
   const work = det.flatMap(([d, l]) => l.map((t) => ({ ...t, d }))).slice(0, 5).map((t) => `<div class="hrow"><span><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}<br><span class="mute">pour ${esc(longDate(t.d))}${t.text ? ' · ' + esc(t.text.length > 70 ? t.text.slice(0, 70) + '…' : t.text) : ''}</span></span></div>`).join('') || `<p>${NOTHING}</p>`;
+  S.evList = [];
   const last = notes.filter((n) => toNum(n.valeur) != null).sort((a, b) => String(b.dateSaisie || b.date).localeCompare(String(a.dateSaisie || a.date))).slice(0, 5)
-    .map((n) => `<div class="hrow"><span><b>${esc(n.libelleMatiere)}</b><br><span class="mute">${esc(n.devoir || '')} · ${esc(longDate(n.date))}</span></span><span class="num" style="color:${color((toNum(n.valeur) / (toNum(n.noteSur) || 20)) * 20)}">${esc(n.valeur)}/${esc(n.noteSur)}</span></div>`).join('') || '<p class="mute">Aucune note pour l\'instant.</p>';
+    .map((n) => `<div class="hrow" role="button" tabindex="0" data-n="${evRef(n)}" title="Détail de l'évaluation" style="cursor:pointer"><span><b>${esc(n.libelleMatiere)}</b><br><span class="mute">${esc(n.devoir || '')} · ${esc(longDate(n.date))}</span></span><span class="num" style="color:${color((toNum(n.valeur) / (toNum(n.noteSur) || 20)) * 20)}">${esc(n.valeur)}/${esc(n.noteSur)}</span></div>`).join('') || '<p class="mute">Aucune note pour l\'instant.</p>';
   $('#view').innerHTML = `<div class="hello"><h2>Bonjour ${esc(S.eleve.prenom)}</h2><div class="mute">${esc(longDate(iso(new Date())))}</div></div>
     <div class="kpis">${k('Moyenne générale', `<span style="color:${color(g)}">${fmt(g)}</span>`, gser.length > 1 ? delta(g - gser[gser.length - 2]) + ' dernière note' : '')}
       ${k('Classe', fmt(cls), g != null && cls != null ? delta(g - cls) + ' vs classe' : '')}

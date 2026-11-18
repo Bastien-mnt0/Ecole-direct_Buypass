@@ -242,3 +242,8 @@ a.link{display:inline-block;text-decoration:none}
  .wxs b{font-size:1rem}
  .wxh{margin:8px 0 0}
  .wxf{margin-top:6px}}.wxs>div:last-child:nth-child(odd){grid-column:1/-1}
+.ev[data-n]{cursor:pointer;border-radius:4px}
+.ev[data-n]:hover{color:var(--accent)}
+.hrow[data-n]:hover{background:var(--p2)}
+.ndet{border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:var(--bg)}
+.ntitle{color:var(--accent);margin-bottom:10px}

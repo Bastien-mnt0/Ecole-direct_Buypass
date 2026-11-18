@@ -8,6 +8,7 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const BASE = 'https://api.ecoledirecte.com';
 const API_VERSION = process.env.ED_VERSION || '4.75.0'; // à ajuster si l'API répond 517
+const CLOUD_VERSION = process.env.ED_CLOUD_VERSION || '4.104.4'; // version utilisée par le site officiel pour le cloud : en dessous, la suppression ne passe pas par la corbeille
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 // Journal local des échanges avec l'API (désactivé par défaut) : ED_LOG=1 node server.js
@@ -21,7 +22,7 @@ function record(entry) {
   fs.appendFileSync(path.join(dir, new Date().toISOString().slice(0, 10) + '.jsonl'), JSON.stringify(redact(entry)) + '\n');
 }
 
-async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form } = {}) {
+async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form, upload } = {}) {
   const jar = { ...cookies };
   const headers = {
     'User-Agent': UA,
@@ -31,12 +32,13 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
     Cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '),
   };
   if (form) delete headers['Content-Type']; // multipart : la bibliothèque fetch ajoute elle-même la frontière
+  if (upload) headers['Content-Type'] = upload.type; // multipart déjà construit par le navigateur (frontière incluse)
   if (jar.GTK) headers['X-GTK'] = jar.GTK;
   if (token) headers['X-Token'] = token;
-  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${API_VERSION}`, {
+  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${urlPath.startsWith('/v3/cloud/') ? CLOUD_VERSION : API_VERSION}`, {
     method,
     headers,
-    body: form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
+    body: upload ? upload.body : form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
   });
   for (const c of res.headers.getSetCookie?.() || []) {
     const kv = c.split(';')[0], i = kv.indexOf('=');
@@ -48,11 +50,20 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
 }
 
 // Fichiers : id numérique (cahier de texte) ; pour le cloud (type CLOUD), l'id peut être un chemin (sans « .. »).
-const okFileId = (id, type) => (type === 'CLOUD' ? /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(id)) && !String(id).includes('..') : /^\d+$/.test(String(id)));
+// Chemin du cloud : pas de caractère de contrôle ni de « .. » (les noms de fichiers peuvent contenir parenthèses, apostrophes, etc.).
+const okCloudPath = (p) => typeof p === 'string' && /^[^\u0000-\u001f"<>|?*]{1,400}$/u.test(p) && !p.includes('..');
+const okFileId = (id, type) => (type === 'CLOUD' ? okCloudPath(String(id)) : /^\d+$/.test(String(id)));
 // Envoi dans le cloud : uniquement edunota.json (JSON, 200 Ko max) dans un dossier désigné par son id. Pas d'envoi générique.
 const okUpload = (b) => b.name === 'edunota.json' && b.mime === 'application/json' && typeof b.text === 'string' && b.text.length <= 2e5 && /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(b.parent)) && !String(b.parent).includes('..');
 const uploadForm = (b) => { const f = new FormData(); f.append('file', new Blob([b.text], { type: 'application/json' }), b.name); return f; };
 const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(b.parent)}`; // format relevé sur le site officiel (champ multipart : file)
+
+// Envoi de fichiers de l'élève dans son cloud (onglet Cloud) : le navigateur envoie le multipart tel quel (champ « file »),
+// le dossier de destination est dans l'URL (?dest=) et la session dans l'en-tête X-Ed-Auth. Uniquement dans le dossier « MON CLOUD EDUNOTA » (insensible à la casse, pour l'ancien dossier en minuscules) (donc jamais dans EDUNOTA, où se trouve edunota.json).
+const MAX_UP = 10.5e6; // 10 Mo de fichier + enveloppe multipart
+const okDest = (d) => okCloudPath(d) && d.startsWith('\\') && /(^|\\)mon cloud edunota(\\|$)/i.test(d); // uniquement dans le dossier « MON CLOUD EDUNOTA » (insensible à la casse, pour l'ancien dossier en minuscules) de l'élève
+const uploadFilePath = (dest) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(dest)}`;
+const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && typeof a.token === 'string' ? { token: a.token, cookies: a.cookies && typeof a.cookies === 'object' ? a.cookies : {} } : null; } catch { return null; } };
 
 const readBody = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => ok(b ? JSON.parse(b) : {})); });
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
@@ -67,13 +78,20 @@ http.createServer(async (req, res) => {
       const { path: p, data, token, cookies } = await readBody(req);
       if (typeof p !== 'string' || !p.startsWith('/v3/')) return send(res, 400, { error: 'chemin refusé' });
       const out = await ed(p, { token, data, cookies });
-      if (LOG) record({ time: new Date().toISOString(), path: p, request: data, response: out.json });
+      if (LOG) record({ time: new Date().toISOString(), path: p, v: p.startsWith('/v3/cloud/') ? CLOUD_VERSION : API_VERSION, request: data, response: out.json });
       return send(res, 200, out);
     }
     if (req.method === 'POST' && req.url === '/api/ed-upload') {
       const b = await readBody(req);
       if (!okUpload(b)) return send(res, 400, { error: 'envoi refusé' });
       return send(res, 200, await ed(uploadPath(b), { token: b.token, cookies: b.cookies, form: uploadForm(b) }));
+    }
+    if (req.method === 'POST' && req.url.startsWith('/api/ed-upload-file')) {
+      const dest = new URL(req.url, 'http://x').searchParams.get('dest'), type = req.headers['content-type'] || '', auth = readAuth(req.headers['x-ed-auth']);
+      if (!okDest(dest) || !type.startsWith('multipart/form-data') || !auth) return send(res, 400, { error: 'envoi refusé' });
+      const chunks = []; let n = 0;
+      for await (const c of req) { n += c.length; if (n > MAX_UP) return send(res, 413, { error: 'Fichier trop volumineux (10 Mo maximum)' }); chunks.push(c); }
+      return send(res, 200, await ed(uploadFilePath(dest), { token: auth.token, cookies: auth.cookies, upload: { type, body: Buffer.concat(chunks) } }));
     }
     if (req.method === 'POST' && req.url === '/api/ed-file') {
       const { id, type, token, cookies } = await readBody(req);

@@ -150,11 +150,11 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 // ---------- Onglets ----------
 function openTab(name) {
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', cloud: 'Cloud' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -443,9 +443,9 @@ const sameSubject = (m, c) => (m.codeMatiere && m.codeMatiere === c.codeMatiere)
 const workHtml = (t) => `<div class="hwi"><b>${esc(t.matiere)}</b>${t.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${t.done ? '<span class="tag">fait</span>' : ''}<div>${t.text ? esc(t.text) : '<span class="mute">Contrôle annoncé</span>'}</div>${docsHtml(t.docs)}</div>`;
 const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 const extOf = (n) => { const m = /\.([a-z0-9]{1,5})$/i.exec(n); return m ? m[1].toLowerCase() : ''; };
-const docsHtml = (docs) => !docs || !docs.length ? '' : `<div class="pjs">${docs.map((d) => {
+const docsHtml = (docs, extra = '') => !docs || !docs.length ? '' : `<div class="pjs">${docs.map((d) => {
   const e = extOf(d.name);
-  return `<div class="pj" data-id="${esc(d.id)}" data-type="${esc(d.type)}" data-name="${esc(d.name)}"><span class="pjn">${esc(d.name)}</span><span class="tag">${esc((e || 'fichier').toUpperCase())}</span><span class="pja">${MIME[e] ? '<button type="button" class="pjb" data-act="view">Aperçu</button>' : ''}<button type="button" class="pjb" data-act="dl">Télécharger</button></span><div class="pjm err" role="alert"></div><div class="pjv"></div></div>`;
+  return `<div class="pj" data-id="${esc(d.id)}" data-type="${esc(d.type)}" data-name="${esc(d.name)}"><span class="pjn">${esc(d.name)}</span><span class="tag">${esc((e || 'fichier').toUpperCase())}</span><span class="pja">${MIME[e] ? '<button type="button" class="pjb" data-act="view">Aperçu</button>' : ''}<button type="button" class="pjb" data-act="dl">Télécharger</button>${extra}</span><div class="pjm err" role="alert"></div><div class="pjv"></div></div>`;
 }).join('')}</div>`;
 const files = new Map();
 async function fileBlob(d) {
@@ -468,7 +468,7 @@ async function fileBlob(d) {
   return f;
 }
 document.addEventListener('click', async (e) => {
-  const b = e.target.closest('.pjb'); if (!b) return;
+  const b = e.target.closest('.pjb:not([data-cl])'); if (!b) return;
   const row = b.closest('.pj'), d = { id: row.dataset.id, type: row.dataset.type, name: row.dataset.name }, msg = row.querySelector('.pjm'), view = row.querySelector('.pjv'), label = b.textContent;
   msg.textContent = '';
   if (b.dataset.act === 'view' && view.firstChild) { view.innerHTML = ''; b.textContent = 'Aperçu'; return; }
@@ -600,17 +600,19 @@ document.addEventListener('change', (e) => {
 const CLOUD = {
   dir: 'EDUNOTA', file: 'edunota.json',
   acct: () => S.acc || { id: S.eleve.id, type: 'E' },
-  // Copie en corbeille : \\10.0.5.87\CORBEILLE\CLOUD14\cloud\... (adresse du serveur relevée sur le site officiel)
-  trash: '\\\\10.0.5.87\\CORBEILLE',
-  trashId: (id) => CLOUD.trash + String(id).replace(/^\\\\/, '\\'),
   // « dest » de l'envoi = chemin du dossier sans le préfixe de serveur (\\CLOUD14\cloud) : \0132038V\E\6616\EDUNOTA  
   dest: (id) => String(id).replace(/^\\\\[^\\]+\\cloud(?=\\)/i, '').replace(/^\\\\/, '\\'),
   route: {
-    list: (a) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { forceDownload: 0 } }),
+    list: (a, depth = 3) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { profondeur: depth } }), // profondeur : nombre de niveaux de sous-dossiers renvoyés (3 sur le site officiel)
+    open: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { profondeur: 3, idFolder: node.id, parentNode: { ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: node.isTrash === true, children: [] } } }), // contenu d'un sous-dossier non chargé par la liste (à ajuster d'après la requête du site officiel si besoin)
     mkdir: (a, name, root) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=post`, data: { parentNode: { ...root, children: [] }, libelle: name, typeRessource: 'folder' } }), // format relevé sur le site officiel
 
-    del: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { tabNodes: [{ ...node, isTrash: false, children: [] }] } }), // 1re suppression : envoi dans la corbeille
-    purge: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { tabNodes: [{ ...node, id: CLOUD.trashId(node.id), isTrash: true, children: [] }] } }), // 2e suppression : vidage de la copie en corbeille
+    del: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}/visibility.awp?verbe=delete`, data: { tabNodes: [{ ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: false, children: [] }] } }), // 1re suppression : envoi dans la corbeille (route visibility.awp du site officiel) ; displayText et isLoaded comme sur le site officiel
+    drop: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { tabNodes: [{ ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: false, children: [] }] } }), // suppression directe, sans corbeille : réservée au remplacement d'edunota.json
+    copy: (a, node, dest) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=copy`, data: { parentNode: { ...dest, id: CLOUD.dest(dest.id), displayText: dest.displayText ?? dest.libelle, isLoaded: true, isTrash: false, children: [] }, clipboard: [{ ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: false, children: [] }] } }), // déplacer = copier puis supprimer l'original (format relevé sur le site officiel : l'id du dossier cible est sans préfixe de serveur)
+    purge: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=delete`, data: { tabNodes: [{ ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: true, children: [] }] } }), // suppression définitive d'un élément de la corbeille (le nœud vient de la corbeille : son id est déjà celui de la copie)
+    restore: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}/visibility.awp?verbe=post`, data: { tabNodes: [{ ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: true, children: [] }] } }), // restauration depuis la corbeille, format relevé sur le site officiel
+    rename: (a, node, name) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=put`, data: { node: { ...node, libelle: name, displayText: name, isLoaded: true, isTrash: false, children: node.children || [] }, newLibelle: name } }), // format relevé sur le site officiel : le nœud garde son ancien id, avec le nouveau nom
     read: '/api/ed-file',    // relais existant (téléchargement), type de fichier « CLOUD »
     write: '/api/ed-upload', // relais : { parent, name, mime, text } → { json, token, cookies }, comme /api/ed
   },
@@ -706,6 +708,7 @@ const cloud = {
     if (r.code !== 200) throw new Error(r.message || 'code ' + r.code);
     return r;
   },
+  list(a, depth) { return cloud.call(CLOUD.route.list(a, depth)); },
   // Recherche en largeur (le plus proche de la racine d'abord) dans l'arborescence renvoyée par le cloud
   find(root, name, wantDir) {
     const isDir = (n) => /^(folder|dossier|dir)$/i.test(n.type || '') || n.isFolder === true || Array.isArray(n.children) || Array.isArray(n.contenu);
@@ -713,7 +716,7 @@ const cloud = {
     while (q.length) {
       const n = q.shift();
       if (Array.isArray(n)) { q.push(...n); continue; }
-      if (!isObj(n)) continue;
+      if (!isObj(n) || n.isTrash === true) continue;
       if ((n.libelle ?? n.name) === name && isDir(n) === wantDir && n.id != null) return n;
       for (const v of Object.values(n)) if (v && typeof v === 'object') q.push(v);
     }
@@ -740,7 +743,7 @@ const cloud = {
   },
   async write(a, dir, old, text) {
     if (old && old.libelle !== CLOUD.file) throw new Error('suppression refusée : ce n\'est pas ' + CLOUD.file);
-    if (old) await cloud.call(CLOUD.route.del(a, old)); // le fichier remplacé est toujours bypass.json dans BYPASS
+    if (old) await cloud.call(CLOUD.route.drop(a, old)); // le fichier remplacé est toujours bypass.json dans BYPASS
     const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: CLOUD.dest(dir.id), name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const o = await r.json().catch(() => ({}));
@@ -748,19 +751,18 @@ const cloud = {
     if (o.cookies) S.cookies = o.cookies;
     sess.save();
     if (!r.ok || o.error || !o.json || o.json.code !== 200) throw new Error(o.error || (o.json && o.json.message) || 'envoi impossible');
-    if (old) { try { await cloud.call(CLOUD.route.purge(a, old)); } catch {} } // l'ancienne version ne reste pas dans la corbeille ; si le vidage échoue, ce n'est pas grave
   },
   async run() {
     if (!S.token || !S.eleve) return;
     cloud.set('sync');
     try {
       const a = CLOUD.acct(), ids = S.eleves.map((e) => String(e.id));
-      let tree = (await cloud.call(CLOUD.route.list(a))).data, dir = cloud.find(tree, CLOUD.dir, true);
+      let tree = (await cloud.list(a)).data, dir = cloud.find(tree, CLOUD.dir, true);
       if (!dir) { // création automatique du dossier BYPASS
         const root = cloud.root(tree);
         if (!root) throw new Error('racine du cloud introuvable');
         await cloud.call(CLOUD.route.mkdir(a, CLOUD.dir, root));
-        tree = (await cloud.call(CLOUD.route.list(a))).data; dir = cloud.find(tree, CLOUD.dir, true);
+        tree = (await cloud.list(a)).data; dir = cloud.find(tree, CLOUD.dir, true);
         if (!dir) throw new Error('création du dossier ' + CLOUD.dir + ' impossible');
       }
       const file = cloud.find(dir, CLOUD.file, false);
@@ -786,6 +788,7 @@ const cloud = {
       }
       cloud.fails = 0; cloud.last = Date.now(); cloud.set('ok');
       if (changed && S.tab === 'devoirs' && !$('#modal').classList.contains('show')) hwRender().catch(() => {});
+      else if (changed && S.tab === 'cloud' && !$('#modal').classList.contains('show') && !($('#clFile') && $('#clFile').disabled)) loadFiles().catch(() => {});
     } catch (e) {
       cloud.set('err', e.message || 'erreur inconnue');
       if (++cloud.fails <= 3 && S.token) cloud.push(60e3 * cloud.fails);
@@ -794,6 +797,277 @@ const cloud = {
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden) cloud.flush(); else cloud.push(0, true); });
 addEventListener('online', () => cloud.push(0));
+// ---------- Onglet Cloud : fichiers personnels de l'élève dans son cloud École Directe ----------
+// Tout se passe dans le dossier « MON CLOUD EDUNOTA » (créé à la racine au premier affichage) : l'onglet n'affiche, n'écrit
+// et ne supprime rien en dehors. Parcours, aperçu et téléchargement réutilisent le lecteur de pièces jointes (docsHtml / fileBlob).
+// Supprimer = mettre à la corbeille d'École Directe (récupérable sur le site officiel). 10 Mo maximum par fichier ajouté.
+// Renommer : vrai renommage sur École Directe (route verbe=put, relevée sur le site officiel).
+const CF = { name: 'MON CLOUD EDUNOTA', cur: null, home: null, dir: null, bin: false, drops: new Map(), drag: null, base: [], nodes: new Map(), max: 10e6 };
+const CL_BIN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M5 6l1 14h12l1-14"/><path d="M10 11v5M14 11v5"/></svg>';
+const clIsDir = (n) => (typeof n.type === 'string' && n.type ? /^(folder|dossier|dir|directory)$/i.test(n.type) : n.isFolder === true || Array.isArray(n.children) || Array.isArray(n.contenu));
+// Contenu d'un nœud : toute liste de nœuds (id + libelle) qu'il porte, quel que soit le nom du champ
+const clKids = (n) => Object.values(n).filter(Array.isArray).flat().filter((c) => isObj(c) && c.id != null && typeof c.libelle === 'string');
+// Chemin (dossier de départ → dossier voulu) ; id nul = dossier de départ
+function clTrail(top, id) {
+  const walk = (n, trail) => {
+    const t = [...trail, n];
+    if (id == null || n.id === id) return t;
+    for (const c of clKids(n)) if (clIsDir(c)) { const r = walk(c, t); if (r) return r; }
+    return null;
+  };
+  return walk(top, []);
+}
+// Nom sûr pour le cloud : sans séparateur de chemin ni caractère interdit, extension conservée, jamais en doublon dans le dossier
+function clName(raw, taken) {
+  const s = String(raw).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').replace(/\.+$/, '').trim() || 'fichier';
+  const m = /(\.[A-Za-z0-9]{1,8})$/.exec(s), ext = m ? m[1] : '', base = s.slice(0, s.length - ext.length).slice(0, 110) || 'fichier';
+  let n = base + ext, i = 2;
+  while (taken.has(n.toLowerCase())) n = `${base} (${i++})${ext}`;
+  return n;
+}
+const clBadName = (v) => !v || v.length > 120 || /[\\/:*?"<>|\u0000-\u001f]/.test(v) || /^\.|\.$/.test(v);
+const clDest = (id) => CLOUD.dest(id).replace(/\\+$/, ''); // chemin d'envoi sans antislash final
+const clGone = (e) => !!e && (e.expired || e.message === 'Session expirée');
+function clExpired() { sess.clear(); show('login'); $('#loginErr').textContent = 'Session expirée : reconnecte-toi.'; const e = new Error('Session expirée'); e.expired = true; return e; }
+// Noms déjà pris dans le dossier ouvert, sauf celui de l'élément exclu
+const clTaken = (excludeId) => new Set(clKids(CF.dir).filter((c) => c.id !== excludeId).map((c) => c.libelle.toLowerCase()));
+// La liste d'École Directe ne renvoie pas toujours le contenu des sous-dossiers : on charge ceux qui sont vides et non marqués « chargés »
+async function clFill(top) {
+  const a = CLOUD.acct(), seen = new Set();
+  const findId = (t, id) => { const q = [t]; while (q.length) { const n = q.shift(); if (Array.isArray(n)) { q.push(...n); continue; } if (!isObj(n)) continue; if (String(n.id) === String(id) && clIsDir(n)) return n; for (const v of Object.values(n)) if (v && typeof v === 'object') q.push(v); } return null; };
+  const dirs = (n) => clKids(n).filter(clIsDir).flatMap((c) => [c, ...dirs(c)]);
+  let calls = 0;
+  while (calls < 60) {
+    const need = dirs(top).filter((c) => !seen.has(String(c.id)) && !clKids(c).length && c.isLoaded !== true).slice(0, 60 - calls);
+    if (!need.length) break;
+    need.forEach((c) => seen.add(String(c.id))); calls += need.length;
+    await Promise.all(need.map(async (c) => {
+      try {
+        const r = await cloud.call(CLOUD.route.open(a, c)), got = findId(r.data, c.id) || (Array.isArray(r.data) ? { children: r.data } : null);
+        if (got) c.children = clKids(got).filter((k) => String(k.id) !== String(c.id));
+      } catch (e) { if (clGone(e)) throw e; }
+    }));
+  }
+}
+// Liste le cloud, trouve (ou crée) le dossier de l'élève et le dossier actuellement ouvert
+async function clTree() {
+  const a = CLOUD.acct();
+  const find = (t) => cloud.find(t, CF.name, true) || cloud.find(t, CF.name.toLowerCase(), true); // dossier créé avant le passage en majuscules
+  let tree = (await cloud.list(a, 8)).data, home = find(tree); // profondeur 8 : le serveur ne charge pas les sous-dossiers au-delà (isLoaded:false)
+  if (!home) {
+    const root = cloud.root(tree);
+    if (!root) throw new Error('racine du cloud introuvable');
+    await cloud.call(CLOUD.route.mkdir(a, CF.name, root));
+    tree = (await cloud.list(a, 8)).data; home = find(tree);
+    if (!home) throw new Error('création du dossier « ' + CF.name + ' » impossible');
+  }
+  CF.home = home;
+  const lower = CF.name.toLowerCase(), q = [tree];
+  let bin = null; // dossier de l'élève dans la corbeille d'École Directe
+  while (q.length && !bin) {
+    const n = q.shift();
+    if (Array.isArray(n)) { q.push(...n); continue; }
+    if (!isObj(n)) continue;
+    if (n.isTrash === true && n.id != null && clIsDir(n) && String(n.libelle).toLowerCase() === lower) { bin = n; break; }
+    for (const v of Object.values(n)) if (v && typeof v === 'object') q.push(v);
+  }
+  const top = CF.bin ? bin : home;
+  if (top) await clFill(top);
+  return { home, bin, trail: top ? clTrail(top, CF.cur) || clTrail(top, null) : null }; // dossier disparu : retour au dossier de départ
+}
+async function loadFiles(note) {
+  const { home, trail } = await clTree();
+  if (S.tab !== 'cloud') return;
+  if (!trail) {
+    CF.dir = null; CF.cur = null; CF.nodes = new Map();
+    $('#view').innerHTML = `<div class="card"><div class="sim"><button type="button" class="pjb" data-cl="home">Retour au cloud</button></div><p class="mute">Aucun élément de « ${CF.name} » dans la corbeille.</p><p class="mute" id="clMsg" role="status"></p><div class="err" id="clErr" role="alert"></div></div>`;
+    if (note) { $('#clMsg').textContent = note.msg || ''; $('#clErr').textContent = note.err || ''; }
+    return;
+  }
+  const dir = trail[trail.length - 1], atHome = trail.length === 1, kids = clKids(dir);
+  CF.dir = dir; CF.cur = atHome ? null : dir.id; CF.base = trail.slice(1).map((n) => n.libelle); CF.nodes = new Map(kids.map((c) => [String(c.id), c]));
+  const byName = (a, b) => a.libelle.localeCompare(b.libelle, 'fr', { numeric: true });
+  const dirs = kids.filter(clIsDir).sort(byName), docs = kids.filter((c) => !clIsDir(c)).sort(byName);
+  CF.drops = CF.bin ? new Map() : new Map([...trail.slice(0, -1), ...dirs].map((n) => [String(n.id), n]));
+  const lbl = (n, i) => (i ? esc(n.libelle) : CF.bin ? 'Corbeille' : 'Mon cloud EDUNOTA');
+  const crumbs = trail.map((n, i) => (i === trail.length - 1 ? `<b>${lbl(n, i)}</b>` : `<button type="button" class="pjb" data-cl="go" data-id="${i ? esc(n.id) : ''}"${CF.bin ? '' : ` data-drop="${esc(n.id)}"`}>${lbl(n, i)}</button>`));
+  const acts = CF.bin ? '<button type="button" class="pjb" data-cl="restore">Restaurer</button><button type="button" class="pjb" data-cl="purge">Supprimer définitivement</button>'
+    : `<button type="button" class="pjb" data-cl="mv">Déplacer</button><button type="button" class="pjb" data-cl="ren">Renommer</button><button type="button" class="pjb" data-cl="trash">${CL_BIN} Corbeille</button>`;
+  const dirRows = dirs.map((d) => `<div class="pj" data-id="${esc(d.id)}"${CF.bin ? '' : ` data-drop="${esc(d.id)}"`}><span class="pjn">${esc(d.libelle)}</span><span class="tag">DOSSIER</span><span class="pja"><button type="button" class="pjb" data-cl="go" data-id="${esc(d.id)}">Ouvrir</button>${acts}</span></div>`).join('');
+  const binRows = docs.map((d) => `<div class="pj" data-id="${esc(d.id)}"><span class="pjn">${esc(d.libelle)}</span><span class="tag">${esc((extOf(d.libelle) || 'fichier').toUpperCase())}</span><span class="pja">${acts}</span></div>`).join('');
+  const list = !dirs.length && !docs.length ? `<p class="mute">${CF.bin ? 'Ce dossier de la corbeille est vide.' : 'Ce dossier est vide.'}</p>`
+    : (dirRows ? `<div class="pjs">${dirRows}</div>` : '') + (CF.bin ? (binRows ? `<div class="pjs">${binRows}</div>` : '') : docsHtml(docs.map((d) => ({ id: d.id, type: 'CLOUD', name: d.libelle })), acts));
+  const legacy = !CF.bin && home.libelle !== CF.name ? `<p class="mute">Ce dossier s'appelle « ${esc(home.libelle)} » sur École Directe. Pour obtenir « ${CF.name} », renomme-le ou mets-le à la corbeille sur le site d'École Directe : EDUNOTA le recréera.</p>` : '';
+  const tools = CF.bin
+    ? `<div class="card"><p class="mute">Éléments mis à la corbeille depuis « Mon cloud EDUNOTA ». Restaurer les remet dans le cloud ; la suppression définitive est irréversible.</p><div class="sim"><button type="button" class="pjb" data-cl="home">Retour au cloud</button></div><p class="mute" id="clMsg" role="status"></p><div class="err" id="clErr" role="alert"></div></div>`
+    : `<div class="card"><p class="mute">Ajoute des fichiers dans ce dossier (10 Mo maximum chacun).</p><div class="sim"><input id="clFile" class="fin" type="file" multiple><label for="clFile" class="fbtn">Sélectionner des fichiers</label><button type="button" class="pjb" data-cl="mkdir">Nouveau dossier</button><button type="button" class="pjb" data-cl="bin">${CL_BIN} Voir la corbeille</button></div><p class="mute" id="clMsg" role="status"></p><div class="err" id="clErr" role="alert"></div></div>`;
+  $('#view').innerHTML = `<div class="card"><div class="sim">${crumbs.join('<span class="mute">/</span>')}</div>${legacy}</div>`
+    + tools
+    + `<div class="card"><div class="hwi">${list}</div></div>`;
+  if (!CF.bin) $('#view').querySelectorAll('.pj[data-id]').forEach((r) => { r.draggable = true; });
+  if (note) { $('#clMsg').textContent = note.msg || ''; $('#clErr').textContent = note.err || ''; }
+}
+// Envoi d'un fichier (File ou Blob) vers un dossier du cloud
+async function clSend(file, name, dest) {
+  const fd = new FormData();
+  fd.append('file', file, name);
+  const r = await fetch(PROXY_URL + '/api/ed-upload-file?dest=' + encodeURIComponent(dest), { method: 'POST', headers: { 'X-Ed-Auth': encodeURIComponent(JSON.stringify({ token: S.token, cookies: S.cookies })) }, body: fd }).catch(() => null);
+  if (!r) throw new Error('relais injoignable');
+  const o = await r.json().catch(() => ({}));
+  if (o.token) S.token = o.token;
+  if (o.cookies) S.cookies = o.cookies;
+  sess.save();
+  if (o.json && [520, 521, 525].includes(o.json.code)) throw clExpired();
+  if (!r.ok || o.error || !o.json || o.json.code !== 200) throw new Error(o.error || (o.json && o.json.message) || 'envoi impossible');
+}
+async function clUpload(list) {
+  const inp = $('#clFile'), msg = $('#clMsg'), dir = CF.dir, dest = clDest(dir.id), taken = clTaken(null), errs = [];
+  let ok = 0;
+  inp.disabled = true; $('#clErr').textContent = '';
+  for (const [i, f] of list.entries()) {
+    msg.textContent = `Envoi de ${f.name} (${i + 1}/${list.length})…`;
+    try {
+      if (!f.size) throw new Error('fichier vide');
+      if (f.size > CF.max) throw new Error('dépasse 10 Mo');
+      const name = clName(f.name, taken);
+      await clSend(f, name, dest);
+      taken.add(name.toLowerCase()); ok++;
+    } catch (e) { if (clGone(e)) return; errs.push(`${f.name} : ${e.message}`); }
+  }
+  for (const k of [...files.keys()]) if (k.startsWith('CLOUD:')) files.delete(k); // aperçus en mémoire : on repart de zéro
+  const note = { msg: ok ? `${ok} fichier${ok > 1 ? 's ajoutés' : ' ajouté'}.` : '', err: errs.join(' · ') };
+  await loadFiles(note).catch((e) => { note.err = (note.err ? note.err + ' · ' : '') + e.message; if (inp.isConnected) { msg.textContent = note.msg; $('#clErr').textContent = note.err; inp.disabled = false; } });
+}
+// Action sur le cloud puis réaffichage : fn renvoie le message de réussite
+async function clRun(label, fn) {
+  const msg = $('#clMsg'), err = $('#clErr'), inp = $('#clFile');
+  if (msg) msg.textContent = label + '…';
+  if (err) err.textContent = '';
+  if (inp) inp.disabled = true;
+  const note = {};
+  try { note.msg = await fn(); for (const k of [...files.keys()]) if (k.startsWith('CLOUD:')) files.delete(k); }
+  catch (e) { if (clGone(e)) return; note.err = e.message || 'erreur inconnue'; }
+  await loadFiles(note).catch((e) => { if ($('#clErr')) $('#clErr').textContent = e.message; if ($('#clFile')) $('#clFile').disabled = false; });
+}
+// Petite fenêtre « nom » (renommer, nouveau dossier) : ok(nom) n'est appelé que pour un nom valide et libre dans le dossier
+// opt.ext : extension d'origine ajoutée si elle manque
+function clNameForm(title, value, taken, ok, opt = {}) {
+  $('#mtitle').textContent = title;
+  $('#mbody').innerHTML = `<label for="clN">Nom</label><input id="clN" maxlength="120" value="${esc(value)}"><div id="clNe" class="err" role="alert"></div><button type="button" id="clNs">Enregistrer</button>`;
+  const go = () => {
+    let v = $('#clN').value.trim();
+    if (opt.ext && v && !v.toLowerCase().endsWith(opt.ext.toLowerCase())) v += opt.ext;
+    if (clBadName(v)) { $('#clNe').textContent = 'Nom invalide : évite / \\ : * ? " < > | et un point au début ou à la fin.'; return; }
+    if (taken.has(v.toLowerCase())) { $('#clNe').textContent = 'Ce nom existe déjà dans ce dossier.'; return; }
+    modal.open(false);
+    if (v !== value) ok(v);
+  };
+  $('#clNs').onclick = go;
+  $('#clN').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+  modal.open(true);
+  const inp = $('#clN'), dot = value.lastIndexOf('.');
+  inp.focus(); inp.setSelectionRange(0, dot > 0 ? dot : value.length);
+}
+function clTrash(node) {
+  const nom = node.libelle;
+  if (!confirm(`Mettre « ${nom} » à la corbeille ?` + (clIsDir(node) ? ' Le dossier et tout son contenu seront déplacés.' : '') + '\nTu pourras le récupérer depuis le site officiel d\'École Directe.')) return;
+  clRun('Mise à la corbeille', async () => {
+    await cloud.call(CLOUD.route.del(CLOUD.acct(), node));
+    return `« ${nom} » est dans la corbeille d'École Directe.`;
+  });
+}
+function clRestore(node) {
+  const nom = node.libelle;
+  clRun('Restauration', async () => {
+    await cloud.call(CLOUD.route.restore(CLOUD.acct(), node));
+    return `« ${nom} » est restauré dans le cloud.`;
+  });
+}
+function clPurge(node) {
+  const nom = node.libelle;
+  if (!confirm(`Supprimer définitivement « ${nom} » ?` + (clIsDir(node) ? ' Le dossier et tout son contenu seront perdus.' : '') + '\nCette action est irréversible.')) return;
+  clRun('Suppression définitive', async () => {
+    await cloud.call(CLOUD.route.purge(CLOUD.acct(), node));
+    return `« ${nom} » est supprimé définitivement.`;
+  });
+}
+// Déplacement sans glisser-déposer (mobile) : fenêtre de choix du dossier de destination
+function clMoveTo(node) {
+  const byName = (a, b) => a.libelle.localeCompare(b.libelle, 'fr', { numeric: true });
+  const rows = [{ n: CF.home, d: 0, label: 'Mon cloud EDUNOTA' }];
+  const walk = (n, d) => { for (const c of clKids(n).filter(clIsDir).sort(byName)) { if (String(c.id) === String(node.id)) continue; rows.push({ n: c, d, label: c.libelle }); walk(c, d + 1); } };
+  walk(CF.home, 1);
+  const here = String(CF.dir.id);
+  $('#mtitle').textContent = `Déplacer « ${node.libelle} »`;
+  $('#mbody').innerHTML = '<p class="mute">Choisis le dossier de destination :</p>' + rows.map((r, i) => `<button type="button" class="pjb" data-mv="${i}" style="display:block;width:100%;text-align:left;margin:4px 0;padding-left:${10 + r.d * 18}px"${String(r.n.id) === here ? ' disabled' : ''}>${r.d ? '↳ ' : ''}${esc(r.label)}${String(r.n.id) === here ? ' (dossier actuel)' : ''}</button>`).join('');
+  $('#mbody').onclick = (e) => {
+    const b = e.target.closest('[data-mv]'); if (!b || b.disabled) return;
+    const dest = rows[Number(b.dataset.mv)].n;
+    $('#mbody').onclick = null;
+    modal.open(false);
+    clMove(node, dest);
+  };
+  modal.open(true);
+}
+// Déplacement par glisser-déposer : copie dans le dossier cible, puis suppression de l'original seulement si la copie y apparaît
+function clMove(node, dest) {
+  if (!node || !dest || String(node.id) === String(dest.id)) return;
+  const fail = (m) => { if ($('#clErr')) $('#clErr').textContent = m; };
+  if (clIsDir(node) && clTrail(node, dest.id)) return fail('Un dossier ne peut pas être déplacé dans lui-même.');
+  if (clKids(dest).some((c) => c.libelle.toLowerCase() === node.libelle.toLowerCase())) return fail(`« ${dest.libelle} » contient déjà un élément nommé « ${node.libelle} ».`);
+  clRun('Déplacement', async () => {
+    const a = CLOUD.acct(), before = new Set(clKids(dest).map((c) => String(c.id)));
+    await cloud.call(CLOUD.route.copy(a, node, dest));
+    let ok = false;
+    for (let i = 0; i < 4 && !ok; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 800));
+      const { home } = await clTree(), t = clTrail(home, dest.id), d = t && t[t.length - 1];
+      ok = !!d && clKids(d).some((c) => !before.has(String(c.id)) && clIsDir(c) === clIsDir(node));
+    }
+    if (!ok) throw new Error(`La copie dans « ${dest.libelle} » n'a pas pu être confirmée : l'original est conservé.`);
+    try { await cloud.call(CLOUD.route.drop(a, node)); }
+    catch (e) { if (clGone(e)) throw e; throw new Error(`Copié dans « ${dest.libelle} », mais l'original n'a pas pu être supprimé : ${e.message}`); }
+    return `« ${node.libelle} » déplacé dans « ${dest.libelle} ».`;
+  });
+}
+const clDropEl = (e) => (CF.drag && !CF.bin ? e.target.closest('[data-drop]') : null);
+document.addEventListener('dragstart', (e) => {
+  const r = !CF.bin && e.target.closest && e.target.closest('.pj[data-id]');
+  if (!r || !CF.nodes.has(r.dataset.id)) return;
+  CF.drag = r.dataset.id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', r.dataset.id);
+});
+document.addEventListener('dragover', (e) => { const t = clDropEl(e); if (t) { e.preventDefault(); t.classList.add('dropping'); } });
+document.addEventListener('dragleave', (e) => { const t = e.target.closest && e.target.closest('[data-drop]'); if (t && !t.contains(e.relatedTarget)) t.classList.remove('dropping'); });
+document.addEventListener('drop', (e) => {
+  const t = clDropEl(e); if (!t) return;
+  e.preventDefault();
+  t.classList.remove('dropping');
+  const node = CF.nodes.get(CF.drag); CF.drag = null;
+  clMove(node, CF.drops.get(t.dataset.drop));
+});
+document.addEventListener('dragend', () => { CF.drag = null; document.querySelectorAll('.dropping').forEach((x) => x.classList.remove('dropping')); });
+document.addEventListener('change', (e) => { if (e.target.id === 'clFile' && e.target.files.length) clUpload([...e.target.files]); });
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cl]'); if (!b) return;
+  const k = b.dataset.cl;
+  if (k === 'bin' || k === 'home') { CF.bin = k === 'bin'; CF.cur = null; loadFiles().catch((err) => { $('#appErr').textContent = err.message; }); return; }
+  if (k === 'go') { CF.cur = b.dataset.id || null; loadFiles().catch((err) => { $('#appErr').textContent = err.message; }); return; }
+  if (k === 'mkdir') return clNameForm('Nouveau dossier', '', clTaken(null), (v) => clRun('Création du dossier', async () => { await cloud.call(CLOUD.route.mkdir(CLOUD.acct(), v, CF.dir)); return `Dossier « ${v} » créé.`; }));
+  const row = b.closest('.pj'), node = row && CF.nodes.get(row.dataset.id); // seuls les éléments listés ici (dans « MON CLOUD EDUNOTA ») sont manipulables
+  if (!node) { if ($('#clErr')) $('#clErr').textContent = 'Élément introuvable : la liste a changé, réessaie.'; return loadFiles().catch(() => {}); }
+  if (CF.bin) return k === 'restore' ? clRestore(node) : k === 'purge' ? clPurge(node) : undefined;
+  if (k === 'trash') return clTrash(node);
+  if (k === 'mv') return clMoveTo(node);
+  if (k === 'ren') {
+    const dir = clIsDir(node), ext = dir ? '' : ((/(\.[A-Za-z0-9]{1,8})$/.exec(node.libelle) || [])[1] || '');
+    clNameForm(dir ? 'Renommer le dossier' : 'Renommer le fichier', node.libelle, clTaken(node.id), (v) => clRun('Renommage', async () => {
+      await cloud.call(CLOUD.route.rename(CLOUD.acct(), node, v));
+      return `Renommé en « ${v} ».`;
+    }), { ext });
+  }
+});
 // Rapproche cours annulés et remplacements (événements distincts dans l'EDT) : c.st = annule | deplace | remplace, c.from/c.to = cours lié, c.hide = annulé déjà représenté par son remplacement
 const EDT_ST = { annule: 'ANNULÉ', deplace: 'DÉPLACÉ', remplace: 'REMPLACÉ' };
 function edtPrep(list) {

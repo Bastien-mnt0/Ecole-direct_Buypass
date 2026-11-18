@@ -2,9 +2,10 @@
 // Il n'accepte que les requêtes venant de ALLOWED_ORIGIN (ton site GitHub Pages).
 const BASE = 'https://api.ecoledirecte.com';
 const API_VERSION = '4.75.0'; // à ajuster si l'API répond 517
+const CLOUD_VERSION = '4.104.4'; // version utilisée par le site officiel pour le cloud : en dessous, la suppression ne passe pas par la corbeille
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
-async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form } = {}) {
+async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form, upload } = {}) {
   const jar = { ...cookies };
   const headers = {
     'User-Agent': UA,
@@ -14,12 +15,13 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
     Cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '),
   };
   if (form) delete headers['Content-Type']; // multipart : la bibliothèque fetch ajoute elle-même la frontière
+  if (upload) headers['Content-Type'] = upload.type; // multipart déjà construit par le navigateur (frontière incluse)
   if (jar.GTK) headers['X-GTK'] = jar.GTK;
   if (token) headers['X-Token'] = token;
-  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${API_VERSION}`, {
+  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${urlPath.startsWith('/v3/cloud/') ? CLOUD_VERSION : API_VERSION}`, {
     method,
     headers,
-    body: form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
+    body: upload ? upload.body : form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
   });
   for (const c of res.headers.getSetCookie?.() || []) {
     const kv = c.split(';')[0], i = kv.indexOf('=');
@@ -31,16 +33,25 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
 }
 
 // Fichiers : id numérique (cahier de texte) ; pour le cloud (type CLOUD), l'id peut être un chemin (sans « .. »).
-const okFileId = (id, type) => (type === 'CLOUD' ? /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(id)) && !String(id).includes('..') : /^\d+$/.test(String(id)));
+// Chemin du cloud : pas de caractère de contrôle ni de « .. » (les noms de fichiers peuvent contenir parenthèses, apostrophes, etc.).
+const okCloudPath = (p) => typeof p === 'string' && /^[^\u0000-\u001f"<>|?*]{1,400}$/u.test(p) && !p.includes('..');
+const okFileId = (id, type) => (type === 'CLOUD' ? okCloudPath(String(id)) : /^\d+$/.test(String(id)));
 // Envoi dans le cloud : uniquement edunota.json (JSON, 200 Ko max) dans un dossier désigné par son id. Pas d'envoi générique.
 const okUpload = (b) => b.name === 'edunota.json' && b.mime === 'application/json' && typeof b.text === 'string' && b.text.length <= 2e5 && /^[\p{L}\p{N}_\-./ %\\]{1,300}$/u.test(String(b.parent)) && !String(b.parent).includes('..');
 const uploadForm = (b) => { const f = new FormData(); f.append('file', new Blob([b.text], { type: 'application/json' }), b.name); return f; };
 const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(b.parent)}`; // format relevé sur le site officiel (champ multipart : file)
 
+// Envoi de fichiers de l'élève dans son cloud (onglet Cloud) : le navigateur envoie le multipart tel quel (champ « file »),
+// le dossier de destination est dans l'URL (?dest=) et la session dans l'en-tête X-Ed-Auth. Uniquement dans le dossier « MON CLOUD EDUNOTA » (insensible à la casse, pour l'ancien dossier en minuscules) (donc jamais dans EDUNOTA, où se trouve edunota.json).
+const MAX_UP = 10.5e6; // 10 Mo de fichier + enveloppe multipart
+const okDest = (d) => okCloudPath(d) && d.startsWith('\\') && /(^|\\)mon cloud edunota(\\|$)/i.test(d); // uniquement dans le dossier « MON CLOUD EDUNOTA » (insensible à la casse, pour l'ancien dossier en minuscules) de l'élève
+const uploadFilePath = (dest) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(dest)}`;
+const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && typeof a.token === 'string' ? { token: a.token, cookies: a.cookies && typeof a.cookies === 'object' ? a.cookies : {} } : null; } catch { return null; } };
+
 export default {
   async fetch(req, env) {
     const allowed = env.ALLOWED_ORIGIN || '';
-    const cors = { 'Access-Control-Allow-Origin': allowed, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Expose-Headers': 'X-Token', Vary: 'Origin' };
+    const cors = { 'Access-Control-Allow-Origin': allowed, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Ed-Auth', 'Access-Control-Expose-Headers': 'X-Token', Vary: 'Origin' };
     const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (!allowed || req.headers.get('Origin') !== allowed) return reply({ error: 'origine refusée' }, 403);
@@ -59,6 +70,14 @@ export default {
         const b = await req.json();
         if (!okUpload(b)) return reply({ error: 'envoi refusé' }, 400);
         return reply(await ed(uploadPath(b), { token: b.token, cookies: b.cookies, form: uploadForm(b) }));
+      }
+      if (req.method === 'POST' && pathname === '/api/ed-upload-file') {
+        const dest = new URL(req.url).searchParams.get('dest'), type = req.headers.get('Content-Type') || '', auth = readAuth(req.headers.get('X-Ed-Auth')), len = Number(req.headers.get('Content-Length')) || 0;
+        if (!okDest(dest) || !type.startsWith('multipart/form-data') || !auth) return reply({ error: 'envoi refusé' }, 400);
+        if (!len || len > MAX_UP) return reply({ error: 'Fichier trop volumineux (10 Mo maximum)' }, 413);
+        const body = await req.arrayBuffer();
+        if (body.byteLength > MAX_UP) return reply({ error: 'Fichier trop volumineux (10 Mo maximum)' }, 413);
+        return reply(await ed(uploadFilePath(dest), { token: auth.token, cookies: auth.cookies, upload: { type, body } }));
       }
       if (req.method === 'POST' && pathname === '/api/ed-file') {
         const { id, type, token, cookies } = await req.json();

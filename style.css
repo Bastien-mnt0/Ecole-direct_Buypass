@@ -12,6 +12,7 @@ body:has(.side:not(.hidden)) .top{padding-left:212px}
 .pill{background:var(--p2);border:1px solid var(--line);border-radius:99px;padding:3px 12px;font-size:.8rem}
 .logout{margin:0;background:none;color:var(--bad);border:1px solid var(--bad);border-radius:6px;padding:3px 12px;font-size:.8rem}
 .icon{margin:0;background:var(--p2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font-size:1rem;line-height:1}
+.top .icon{width:34px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
 .burger{display:none;position:relative;width:40px;height:40px;margin:0;padding:0;border-radius:10px;background:var(--p2);border:1px solid var(--line);transition:background .15s,border-color .15s,transform .1s}
 .burger i{position:absolute;left:10px;right:10px;height:2px;border-radius:2px;background:var(--ink);transition:transform .2s,opacity .2s}
 .burger i:nth-child(1){top:12px}.burger i:nth-child(2){top:19px}.burger i:nth-child(3){top:26px}

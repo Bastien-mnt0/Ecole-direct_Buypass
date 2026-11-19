@@ -26,6 +26,7 @@ function show(view) {
   $('#side').classList.toggle('hidden', view !== 'app');
   $('#who').classList.toggle('hidden', view !== 'app');
   $('#sport').classList.toggle('hidden', view !== 'app');
+  $('#dp').classList.toggle('hidden', view !== 'app');
   if (view !== 'app') $('#eleve').classList.add('hidden');
 }
 
@@ -50,7 +51,7 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'viescolaire', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces', 'cloud', 'pm'].includes(v.a) ? v.a : 'home' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'viescolaire', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces', 'cloud', 'menu', 'pm'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
@@ -114,7 +115,7 @@ const applyTheme = (t) => { document.documentElement.dataset.theme = t; store.se
 applyTheme(store.get('ed-theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 $('#theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 // ---------- Connexion ----------
-function setWho() { $('#school').textContent = S.school || ''; $('#who').textContent = `${S.eleve.prenom} ${S.eleve.nom || ''}`.trim(); }
+function setWho() { $('#school').textContent = S.school || ''; $('#who').textContent = `${S.eleve.prenom} ${S.eleve.nom || ''}`.trim(); syncDp(); }
 async function login(fa = []) {
   const res = await api('/v3/login.awp', { identifiant: $('#id').value.trim(), motdepasse: $('#pw').value, isReLogin: false, uuid: '', fa });
   if (res.code === 250) return startQcm();
@@ -177,12 +178,13 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 
 // ---------- Onglets ----------
 function openTab(name) {
+  if (name === 'menu' && !dpOn()) name = 'home'; // élève non demi-pensionnaire : pas de menu
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { home: 'Accueil', viescolaire: 'Vie scolaire', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud', pm: 'Porte-monnaie' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', viescolaire: 'Vie scolaire', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud', menu: 'Menu de la cantine', pm: 'Porte-monnaie' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(2500, true); return loadFiles(); }, pm: loadPM })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(2500, true); return loadFiles(); }, menu: () => loadMenu(), pm: loadPM })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -212,6 +214,200 @@ async function loadPM() {
     const sc = +c.solde || 0;
     return `<div class="card"><div class="mute">${esc((c.libelleCompte || c.libelle || 'Compte').trim())}</div><div class="num" style="font-size:2rem;font-weight:700;color:${sc < 0 ? 'var(--bad)' : 'var(--good)'}">${eur(sc)}</div><p class="mute">Solde disponible${(c.avenir || []).length ? ' · ' + c.avenir.length + ' opération(s) à venir' : ''}</p></div><div class="card"><h3 style="margin-top:0">Écritures</h3>${rows || '<p class="mute">Aucune écriture.</p>'}</div>`;
   }).join('');
+}
+
+// ---------- Bouton « DP » (demi-pensionnaire) : affiche ou masque l'onglet Menu, réglage mémorisé pour chaque élève ----------
+const dpKey = () => 'ed-dp:' + (S.eleve ? S.eleve.id : '');
+const dpOn = () => store.get(dpKey(), true) !== false;
+function syncDp() {
+  const on = dpOn(), b = $('#dp'), t = document.querySelector('[data-tab="menu"]');
+  b.setAttribute('aria-pressed', on);
+  b.title = on ? 'Demi-pensionnaire : menu affiché (toucher pour le masquer)' : 'Externe : menu masqué (toucher pour l\'afficher)';
+  if (t) t.style.display = on ? '' : 'none';
+}
+$('#dp').onclick = () => { store.set(dpKey(), !dpOn()); syncDp(); if (S.tab === 'menu' && !dpOn()) openTab('home'); };
+// ---------- Onglet Menu : menus de la cantine (PDF hebdomadaires), lus par OCR ----------
+const MENU_DAYS = ['LUNDI', 'MARDI', 'MERCREDI', 'JEUDI', 'VENDREDI'];
+const MENU_ROWS = [['entree', 'Entrée', /^ENTR/], ['plat', 'Plat protidique', /^(PLAT|PROT)/], ['acc', 'Accompagnement', /^ACCOMP/], ['lait', 'Laitage', /^LAIT/], ['dessert', 'Dessert', /^DESS/]];
+const menuNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+function menuLev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+const menuDayOf = (t) => { const n = menuNorm(t); if (n.length < 4) return -1; return MENU_DAYS.findIndex((d) => n === d || (Math.abs(n.length - d.length) <= 1 && menuLev(n, d) <= 1)); };
+const menuMedian = (a) => { const s = a.filter(Number.isFinite).sort((x, y) => x - y); return s.length ? s[s.length >> 1] : 0; };
+// Séparateurs horizontaux du tableau : lignes plus sombres que le fond, sur une bande de pixels sans texte (profil de luminance par ligne)
+function menuSeps(lum, from, to) {
+  const bg = menuMedian(lum.slice(from, to)), out = [];
+  let y = from;
+  while (y < to) {
+    if (lum[y] < bg - 12) { let e = y; while (e + 1 < to && lum[e + 1] < bg - 12) e++; out.push((y + e) / 2); y = e + 1; } else y++;
+  }
+  return out;
+}
+// words : [{ text, conf, x0, y0, x1, y1, ink }] (image « à l'endroit »), lum : luminance moyenne par ligne de pixels (bande de gauche)
+function menuParse(words, lum) {
+  const W = words.filter((w) => w.text && /[A-Za-zÀ-ÿ0-9]/.test(w.text) && (w.conf == null || w.conf >= 5));
+  const cx = (w) => (w.x0 + w.x1) / 2, cy = (w) => (w.y0 + w.y1) / 2;
+  const heads = [];
+  for (const w of W) { const i = menuDayOf(w.text); if (i >= 0 && !heads.some((h) => h.i === i)) heads.push({ i, x: cx(w), y1: w.y1, y: cy(w) }); }
+  if (heads.length < 3) return null;
+  heads.sort((a, b) => a.i - b.i);
+  const first = heads[0], last = heads[heads.length - 1], step = (last.x - first.x) / (last.i - first.i);
+  const colX = MENU_DAYS.map((_, i) => first.x + (i - first.i) * step);
+  const hy = menuMedian(heads.map((h) => h.y)), headBottom = Math.max(...heads.map((h) => h.y1)) + 15;
+  const left = colX[0] - step / 2, right = colX[4] + step / 2;
+  // étiquettes de lignes (colonne de gauche)
+  const lab = MENU_ROWS.map(() => []);
+  for (const w of W) if (cx(w) < left && cy(w) > headBottom) { const n = menuNorm(w.text), k = MENU_ROWS.findIndex((r) => r[2].test(n)); if (k >= 0) lab[k].push(cy(w)); }
+  const labY = lab.map((l) => (l.length ? l.reduce((a, b) => a + b, 0) / l.length : null));
+  if (labY.some((v) => v == null)) return null;
+  // limites de lignes : séparateur situé entre deux étiquettes, sinon milieu
+  const seps = menuSeps(lum, Math.round(headBottom), lum.length);
+  const bounds = [headBottom];
+  for (let k = 0; k < 4; k++) { const c = seps.filter((s) => s > labY[k] && s < labY[k + 1]); bounds.push(c.length === 1 ? c[0] : (labY[k] + labY[k + 1]) / 2); }
+  const endSep = seps.filter((s) => s > labY[4]);
+  bounds.push(endSep.length ? endSep[0] : labY[4] + (labY[4] - bounds[4]));
+  // répartition des mots dans les cellules
+  const cells = {};
+  for (const w of W) {
+    const x = cx(w), y = cy(w);
+    if (x < left || x > right || y < bounds[0] || y > bounds[5]) continue;
+    const c = colX.reduce((b, v, i) => (Math.abs(x - v) < Math.abs(x - colX[b]) ? i : b), 0);
+    const r = bounds.findIndex((b, i) => i < 5 && y >= b && y < bounds[i + 1]);
+    if (r >= 0) (cells[c + ':' + r] ||= []).push(w);
+  }
+  const lineH = menuMedian(W.filter((w) => w.conf == null || w.conf >= 60).map((w) => w.y1 - w.y0)) || 20;
+  const days = MENU_DAYS.map((name, c) => {
+    const rows = {};
+    MENU_ROWS.forEach(([key], r) => {
+      const ws = (cells[c + ':' + r] || []).slice().sort((a, b) => cy(a) - cy(b));
+      const lines = [];
+      for (const w of ws) { const l = lines[lines.length - 1]; if (l && Math.abs(cy(w) - l.y) <= lineH * 0.6) { l.w.push(w); l.y = (l.y * (l.w.length - 1) + cy(w)) / l.w.length; } else lines.push({ w: [w], y: cy(w) }); }
+      lines.forEach((l) => { l.top = menuMedian(l.w.map((w) => w.y0)); });
+      const items = [];
+      // une ligne qui suit de près la précédente (pas de ligne ~2,4 × la hauteur du texte ; entre deux plats ≥ 3,2 ×) est la suite du même plat
+      for (const l of lines) { const it = items[items.length - 1]; if (it && l.top - it.top <= lineH * 2.8) { it.lines.push(l); it.top = l.top; } else items.push({ lines: [l], top: l.top }); }
+      rows[key] = items.map((it) => {
+        const all = it.lines.flatMap((l) => l.w.slice().sort((a, b) => a.x0 - b.x0));
+        const kept = all.map((w) => ({ ...w, text: w.text.replace(/[@=»«|~_*<>\\]/g, '').trim() })).filter((w) => /[A-Za-zÀ-ÿ0-9]{2,}/.test(w.text) || /^(à|a|y|d|l|\(|\)|&)$/i.test(w.text));
+        const text = kept.map((w) => w.text).join(' ').replace(/\s+([,.)])/g, '$1').replace(/\(\s+/g, '(').replace(/\s{2,}/g, ' ').replace(/\s+AB$/, '').trim();
+        const ink = kept.filter((w) => w.ink != null && w.text.replace(/[^A-Za-zÀ-ÿ]/g, '').length >= 4).map((w) => w.ink);
+        return { text, bold: ink.length ? menuMedian(ink) >= 0.345 : false, low: kept.some((w) => w.conf != null && w.conf < 60) };
+      }).filter((it) => it.text.length > 2);
+    });
+    return { name: name[0] + name.slice(1).toLowerCase(), rows };
+  });
+  return { days, hy, bounds };
+}
+
+// Le PDF de menu ne contient aucun texte (lettres dessinées en vectoriel) : on l'affiche en image (pdf.js) puis on le lit par OCR (tesseract.js), tout dans le navigateur.
+// Route des menus : POST /v3/menusRestaurationScolaire.awp?verbe=get → [{ semaine, doc: { id, libelle } }]
+const MENU_TYPES = ['FICHIER_MENU_RESTAURATION']; // confirmé : telechargement.awp?verbe=get&fichierId=<id>&leTypeDeFichier=FICHIER_MENU_RESTAURATION, corps data={forceDownload:0,idEtab:0}
+const menuLoadScript = (src) => new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('Chargement impossible : ' + src)); document.head.appendChild(s); });
+let menuLibsP;
+const menuLibs = () => (menuLibsP ||= Promise.all([
+  menuLoadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'),
+  menuLoadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'),
+]).then(() => { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }).catch((e) => { menuLibsP = null; throw e; }));
+const menuIsoWeek = (d) => { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7); };
+const menuKey = (w) => (w >= 30 ? w : w + 53); // ordre dans l'année scolaire (sept. → juin)
+function menuMonday(w) {
+  const now = new Date(), y0 = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1, y = w >= 30 ? y0 : y0 + 1;
+  const j4 = new Date(y, 0, 4); return new Date(y, 0, 4 - ((j4.getDay() + 6) % 7) + (w - 1) * 7);
+}
+const menuMonth = (d) => d.toLocaleDateString('fr-FR', { month: 'long' });
+function menuLabel(w) { const m = menuMonday(w), v = new Date(m); v.setDate(v.getDate() + 4); return `Semaine du ${m.getDate()}${menuMonth(m) !== menuMonth(v) ? ' ' + menuMonth(m) : ''} au ${v.getDate()} ${menuMonth(v)}`; }
+async function menuPdf(doc) {
+  const known = store.get('ed-menu-type', null);
+  let last;
+  for (const type of known ? [known] : MENU_TYPES) {
+    try {
+      const f = await fileBlob({ id: doc.id, type, name: 'menu-semaine-' + doc.id + '.pdf' });
+      const buf = await (await fetch(f.url)).arrayBuffer();
+      if (new TextDecoder().decode(buf.slice(0, 4)) !== '%PDF') throw new Error('Le fichier reçu n\'est pas un PDF');
+      store.set('ed-menu-type', type);
+      return { buf, url: f.url };
+    } catch (e) { last = e; files.delete(type + ':' + doc.id); }
+  }
+  if (known) store.set('ed-menu-type', null);
+  throw last || new Error('Menu indisponible');
+}
+function menuInk(ctx, w) { // part d'encre dans le rectangle serré autour du texte : plus élevée pour le gras
+  const x = Math.max(0, w.x0 | 0), y = Math.max(0, w.y0 | 0), ww = Math.max(1, (w.x1 - w.x0) | 0), hh = Math.max(1, (w.y1 - w.y0) | 0);
+  const d = ctx.getImageData(x, y, ww, hh).data;
+  let n = 0, x0 = ww, x1 = -1, y0 = hh, y1 = -1;
+  for (let j = 0; j < hh; j++) for (let i = 0; i < ww; i++) { const p = (j * ww + i) * 4; if (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2] < 110) { n++; if (i < x0) x0 = i; if (i > x1) x1 = i; if (j < y0) y0 = j; if (j > y1) y1 = j; } }
+  return n ? n / ((x1 - x0 + 1) * (y1 - y0 + 1)) : 0;
+}
+async function menuRead(buf, say) {
+  say('Chargement du lecteur…');
+  await menuLibs();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise, page = await pdf.getPage(1), base = page.getViewport({ scale: 1 });
+  say('Lecture du menu (première fois : environ 20 s)…');
+  const worker = await Tesseract.createWorker('fra', 1, { logger: (m) => { if (m.status === 'recognizing text') say('Lecture du menu… ' + Math.round(m.progress * 100) + ' %'); } });
+  try {
+    await worker.setParameters({ tessedit_pageseg_mode: '11' });
+    for (const rot of base.width < base.height ? [90, 270] : [0, 180]) { // tableau couché sur la page : on essaie les deux sens
+      const vp = page.getViewport({ scale: 3.5, rotation: (page.rotate + rot) % 360 }), cv = document.createElement('canvas');
+      cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const { data } = await worker.recognize(cv);
+      const words = (data.words || []).map((w) => ({ text: w.text, conf: w.confidence, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 }));
+      for (const w of words) w.ink = menuInk(ctx, w);
+      const sx = Math.round(cv.width * 0.04), sw = Math.max(4, Math.round(cv.width * 0.015)), px = ctx.getImageData(sx, 0, sw, cv.height).data, lum = [];
+      for (let y = 0; y < cv.height; y++) { const a = []; for (let i = 0; i < sw; i++) { const p = (y * sw + i) * 4; a.push(0.299 * px[p] + 0.587 * px[p + 1] + 0.114 * px[p + 2]); } a.sort((p, q) => p - q); lum.push(a[a.length >> 1]); }
+      const r = menuParse(words, lum);
+      if (r) return { days: r.days, at: Date.now() };
+    }
+  } finally { worker.terminate(); }
+  throw new Error('Menu illisible : la mise en page du PDF a changé. Utilise « Voir le PDF ».');
+}
+function menuDayHtml(day, date, today) {
+  const R = day.rows, main = ['entree', 'plat', 'acc', 'dessert'].some((k) => (R[k] || []).length);
+  const rows = main ? [['entree', 'Entrée'], ['plat', 'Plat'], ['acc', 'Accompagnement'], ['lait', 'Laitage'], ['dessert', 'Dessert']].filter(([k]) => (R[k] || []).length).map(([k, l]) =>
+    `<div style="display:flex;gap:12px;padding:8px 0;border-top:1px solid var(--line)"><span class="mute" style="flex:0 0 7.5em">${l}</span><span style="flex:1">${R[k].map((it) => `<div>${it.bold ? '<b>' + esc(it.text) + '</b>' : esc(it.text)}${it.low ? ' <span class="tag">à vérifier</span>' : ''}</div>`).join('')}</span></div>`).join('') : '<p class="mute">Pas de repas prévu.</p>';
+  return `<div class="card"${today ? ' style="border-color:var(--accent,currentColor)"' : ''}><h3 style="margin-top:0">${day.name} ${date.getDate()} ${menuMonth(date)}${today ? ' <span class="tag">aujourd\'hui</span>' : ''}</h3>${rows}</div>`;
+}
+async function loadMenu(force) {
+  const r = await apiCached('/v3/menusRestaurationScolaire.awp?verbe=get', {}, 600e3);
+  if (r.code !== 200) throw new Error(r.message || 'Menus indisponibles (code ' + r.code + ')');
+  const list = (Array.isArray(r.data) ? r.data : []).filter((x) => x && x.doc && x.doc.id != null && x.semaine != null).sort((a, b) => menuKey(a.semaine) - menuKey(b.semaine));
+  if (S.tab !== 'menu') return;
+  if (!list.length) { $('#view').innerHTML = '<div class="card"><p class="mute">Aucun menu publié pour le moment.</p></div>'; return; }
+  const cur = menuIsoWeek(new Date());
+  const sel = list.find((x) => x.semaine === S.menuWeek) || list.find((x) => x.semaine === cur) || list.find((x) => menuKey(x.semaine) > menuKey(cur)) || list[list.length - 1];
+  S.menuWeek = sel.semaine;
+  const i = list.indexOf(sel), go = (w) => { S.menuWeek = w; loadMenu().catch((e) => { $('#appErr').textContent = e.message; }); };
+  $('#view').innerHTML = `<div class="card"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="pjb" data-cl="1" id="menuPrev" aria-label="Semaine précédente"${i ? '' : ' disabled'}>‹</button><select id="menuSel" aria-label="Semaine" style="flex:1;min-width:12em">${list.map((x) => `<option value="${x.semaine}"${x === sel ? ' selected' : ''}>${esc(menuLabel(x.semaine))}${x.semaine === cur ? ' (en cours)' : ''}</option>`).join('')}</select><button type="button" class="pjb" data-cl="1" id="menuNext" aria-label="Semaine suivante"${i < list.length - 1 ? '' : ' disabled'}>›</button></div><div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="pjb" data-cl="1" id="menuPdf">Voir le PDF</button><button type="button" class="pjb" data-cl="1" id="menuRe">Relire le PDF</button></div></div><div id="menuBody"><p class="mute" id="menuSay">Chargement…</p></div><div id="menuBox"></div>`;
+  $('#menuSel').onchange = (e) => go(+e.target.value);
+  $('#menuPrev').onclick = () => go(list[i - 1].semaine);
+  $('#menuNext').onclick = () => go(list[i + 1].semaine);
+  $('#menuRe').onclick = () => { store.set('ed-menu-v1:' + sel.semaine, null); loadMenu(true).catch((e) => { $('#appErr').textContent = e.message; }); };
+  $('#menuPdf').onclick = async () => {
+    const box = $('#menuBox'), b = $('#menuPdf');
+    if (box.firstChild) { box.innerHTML = ''; b.textContent = 'Voir le PDF'; return; }
+    b.disabled = true;
+    try { const f = await menuPdf(sel.doc); box.innerHTML = `<div class="card"><div class="pjv"><iframe src="${f.url}" title="${esc(menuLabel(sel.semaine))}"></iframe></div></div>`; b.textContent = 'Masquer le PDF'; }
+    catch (e) { $('#appErr').textContent = e.message; }
+    b.disabled = false;
+  };
+  const alive = () => S.tab === 'menu' && S.menuWeek === sel.semaine && $('#menuBody');
+  let data = force ? null : store.get('ed-menu-v1:' + sel.semaine, null);
+  if (!data) {
+    const say = (t) => { const e = $('#menuSay'); if (e && alive()) e.textContent = t; };
+    say('Téléchargement du PDF…');
+    const f = await menuPdf(sel.doc);
+    data = await menuRead(f.buf, say);
+    store.set('ed-menu-v1:' + sel.semaine, data);
+  }
+  if (!alive()) return;
+  const mon = menuMonday(sel.semaine), todayIdx = sel.semaine === cur ? (new Date().getDay() + 6) % 7 : -1;
+  $('#menuBody').innerHTML = data.days.map((d, k) => { const dt = new Date(mon); dt.setDate(dt.getDate() + k); return menuDayHtml(d, dt, k === todayIdx); }).join('') + '<p class="mute">Menu lu automatiquement dans le PDF : des erreurs sont possibles (signalées « à vérifier »). En gras : choix conseillé GEMRCN, déduit de l\'épaisseur du texte.</p>';
 }
 
 // ---------- Notes ----------

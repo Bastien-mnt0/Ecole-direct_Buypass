@@ -23,6 +23,8 @@ function record(entry) {
   fs.appendFileSync(path.join(dir, new Date().toISOString().slice(0, 10) + '.jsonl'), JSON.stringify(redact(entry)) + '\n');
 }
 
+// Routes récentes (cloud, menus de la cantine) : on utilise la version du site officiel
+const newer = (p) => p.startsWith('/v3/cloud/') || p.startsWith('/v3/menusRestaurationScolaire') || p.includes('leTypeDeFichier=FICHIER_MENU_RESTAURATION');
 async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form, upload } = {}) {
   const jar = { ...cookies };
   const headers = {
@@ -36,7 +38,7 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
   if (upload) headers['Content-Type'] = upload.type; // multipart déjà construit par le navigateur (frontière incluse)
   if (jar.GTK) headers['X-GTK'] = jar.GTK;
   if (token) headers['X-Token'] = token;
-  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${urlPath.startsWith('/v3/cloud/') ? CLOUD_VERSION : API_VERSION}`, {
+  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${newer(urlPath) ? CLOUD_VERSION : API_VERSION}`, {
     method,
     headers,
     body: upload ? upload.body : form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
@@ -79,7 +81,7 @@ http.createServer(async (req, res) => {
       const { path: p, data, token, cookies } = await readBody(req);
       if (typeof p !== 'string' || !p.startsWith('/v3/')) return send(res, 400, { error: 'chemin refusé' });
       const out = await ed(p, { token, data, cookies });
-      if (LOG) record({ time: new Date().toISOString(), path: p, v: p.startsWith('/v3/cloud/') ? CLOUD_VERSION : API_VERSION, request: data, response: out.json });
+      if (LOG) record({ time: new Date().toISOString(), path: p, v: newer(p) ? CLOUD_VERSION : API_VERSION, request: data, response: out.json });
       return send(res, 200, out);
     }
     if (req.method === 'POST' && req.url === '/api/ed-upload') {
@@ -97,7 +99,7 @@ http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/ed-file') {
       const { id, type, token, cookies } = await readBody(req);
       if (!okFileId(id, type) || !/^[A-Z_]+$/.test(String(type))) return send(res, 400, { error: 'fichier refusé' });
-      const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token, cookies, data: {}, raw: true });
+      const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token, cookies, data: type === 'FICHIER_MENU_RESTAURATION' ? { forceDownload: 0, idEtab: 0 } : {}, raw: true });
       const ct = out.res.headers.get('content-type') || '';
       if (!out.res.ok || ct.includes('json')) {
         const j = await out.res.json().catch(() => ({}));

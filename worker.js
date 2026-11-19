@@ -5,6 +5,8 @@ const API_VERSION = '4.75.0'; // à ajuster si l'API répond 517
 const CLOUD_VERSION = '4.104.4'; // version utilisée par le site officiel pour le cloud : en dessous, la suppression ne passe pas par la corbeille
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
+// Routes récentes (cloud, menus de la cantine) : on utilise la version du site officiel
+const newer = (p) => p.startsWith('/v3/cloud/') || p.startsWith('/v3/menusRestaurationScolaire') || p.includes('leTypeDeFichier=FICHIER_MENU_RESTAURATION');
 async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form, upload } = {}) {
   const jar = { ...cookies };
   const headers = {
@@ -18,7 +20,7 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
   if (upload) headers['Content-Type'] = upload.type; // multipart déjà construit par le navigateur (frontière incluse)
   if (jar.GTK) headers['X-GTK'] = jar.GTK;
   if (token) headers['X-Token'] = token;
-  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${urlPath.startsWith('/v3/cloud/') ? CLOUD_VERSION : API_VERSION}`, {
+  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${newer(urlPath) ? CLOUD_VERSION : API_VERSION}`, {
     method,
     headers,
     body: upload ? upload.body : form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
@@ -82,7 +84,7 @@ export default {
       if (req.method === 'POST' && pathname === '/api/ed-file') {
         const { id, type, token, cookies } = await req.json();
         if (!okFileId(id, type) || !/^[A-Z_]+$/.test(String(type))) return reply({ error: 'fichier refusé' }, 400);
-        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token, cookies, data: {}, raw: true });
+        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token, cookies, data: type === 'FICHIER_MENU_RESTAURATION' ? { forceDownload: 0, idEtab: 0 } : {}, raw: true });
         const ct = out.res.headers.get('content-type') || '';
         if (!out.res.ok || ct.includes('json')) {
           const j = await out.res.json().catch(() => ({}));

@@ -50,7 +50,7 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'viescolaire', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces'].includes(v.a) ? v.a : 'home' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'viescolaire', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces', 'cloud', 'pm'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
@@ -150,13 +150,41 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 // ---------- Onglets ----------
 function openTab(name) {
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { home: 'Accueil', viescolaire: 'Vie scolaire', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', viescolaire: 'Vie scolaire', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud', pm: 'Porte-monnaie' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); }, pm: loadPM })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
+
+// ---------- Onglet Porte-monnaie : comptes (restauration…) de l'élève, lecture seule ----------
+// Route : POST /v3/comptes/detail.awp?verbe=get (corps « data={} »), comme sur le site officiel.
+const eur = (n) => (n == null || Number.isNaN(+n) ? '–' : (+n).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }));
+const pmDate = (d) => { const t = new Date(String(d || '').slice(0, 10) + 'T12:00:00'); return Number.isNaN(+t) ? '' : t.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
+const pmSign = (n) => `<b class="num" style="color:${n < 0 ? 'var(--bad)' : 'var(--good)'}">${n > 0 ? '+' : ''}${eur(n)}</b>`;
+async function loadPM() {
+  const r = await api('/v3/comptes/detail.awp?verbe=get', {});
+  if (r.code !== 200) throw new Error(r.message || 'Porte-monnaie indisponible (code ' + r.code + ')');
+  const all = Array.isArray(r.data && r.data.comptes) ? r.data.comptes : [];
+  const mine = all.filter((c) => c && (c.idEleve == null || String(c.idEleve) === String(S.eleve.id)));
+  const comptes = mine.length ? mine : all;
+  if (S.tab !== 'pm') return;
+  if (!comptes.length) { $('#view').innerHTML = '<div class="card"><p class="mute">Aucun compte porte-monnaie pour cet élève.</p></div>'; return; }
+  const byDate = (a, b) => String(b.date || '').localeCompare(String(a.date || ''));
+  $('#view').innerHTML = comptes.map((c) => {
+    const ecr = (Array.isArray(c.ecritures) ? c.ecritures : []).slice().sort(byDate);
+    const rows = ecr.map((e) => {
+      const sub = Array.isArray(e.ecritures) ? e.ecritures.slice().sort(byDate) : [];
+      if (!sub.length) return `<div class="hrow"><span><b>${esc(e.libelle || 'Opération')}</b><br><span class="mute">${esc(pmDate(e.date))}</span></span><span style="text-align:right">${pmSign(+e.montant || 0)}</span></div>`;
+      const total = sub.reduce((t, x) => t + (+x.montant || 0), 0);
+      const lines = sub.map((x) => `<div class="hrow"><span>${esc(x.libelle || '')}<br><span class="mute">${esc(pmDate(x.date))}</span></span><span style="text-align:right" class="num">${eur(-(+x.montant || 0))}</span></div>`).join('');
+      return `<details style="border-bottom:1px solid var(--line)"><summary class="hrow" style="cursor:pointer;list-style:none"><span><b>${esc(e.libelle || 'Consommation en cours')}</b> <span class="tag">${sub.length} repas</span><br><span class="mute">${esc(pmDate(e.date))} · toucher pour le détail</span></span><span style="text-align:right">${pmSign(-total)}</span></summary>${lines}</details>`;
+    }).join('');
+    const sc = +c.solde || 0;
+    return `<div class="card"><div class="mute">${esc((c.libelleCompte || c.libelle || 'Compte').trim())}</div><div class="num" style="font-size:2rem;font-weight:700;color:${sc < 0 ? 'var(--bad)' : 'var(--good)'}">${eur(sc)}</div><p class="mute">Solde disponible${(c.avenir || []).length ? ' · ' + c.avenir.length + ' opération(s) à venir' : ''}</p></div><div class="card"><h3 style="margin-top:0">Écritures</h3>${rows || '<p class="mute">Aucune écriture.</p>'}</div>`;
+  }).join('');
+}
 
 // ---------- Notes ----------
 const sig = (n) => !(n.nonSignificatif === true || n.nonSignificatif === 'true');

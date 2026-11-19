@@ -71,6 +71,23 @@ const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')
 const readBody = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => ok(b ? JSON.parse(b) : {})); });
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 
+// Liste blanche : seules les routes réellement utilisées par app.js sont relayées (le reste de l'API École Directe reste inaccessible).
+const ROUTES = [
+  /^\/v3\/login\.awp$/,
+  /^\/v3\/connexion\/doubleauth\.awp$/,
+  /^\/v3\/eleves\/\d+\/(notes|viescolaire|messages|cahierdetexte)\.awp$/i,
+  /^\/v3\/eleves\/\d+\/cahierdetexte\/\d{4}-\d{2}-\d{2}\.awp$/i,
+  /^\/v3\/(eleves|familles)\/\d+\/messages(\/[\w-]+)?\.awp$/i,
+  /^\/v3\/E\/\d+\/(emploidutemps|espacestravail)\.awp$/,
+  /^\/v3\/cloud\/[A-Z]\/[\w-]+(\/visibility)?\.awp$/,
+  /^\/v3\/comptes\/detail\.awp$/,
+  /^\/v3\/menusRestaurationScolaire\.awp$/,
+];
+const okRoute = (p) => {
+  const i = p.indexOf('?'), name = i < 0 ? p : p.slice(0, i), qs = i < 0 ? '' : p.slice(i + 1);
+  return ROUTES.some((r) => r.test(name)) && /^[\w%=&.\-~!*'()]*$/.test(qs) && !qs.includes('..') && !/%2e%2e/i.test(qs);
+};
+
 http.createServer(async (req, res) => {
   try {
     if (req.method === 'POST' && req.url === '/api/gtk') {
@@ -79,7 +96,7 @@ http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && req.url === '/api/ed') {
       const { path: p, data, token, cookies } = await readBody(req);
-      if (typeof p !== 'string' || !p.startsWith('/v3/')) return send(res, 400, { error: 'chemin refusé' });
+      if (typeof p !== 'string' || !okRoute(p)) return send(res, 400, { error: 'chemin refusé' });
       const out = await ed(p, { token, data, cookies });
       if (LOG) record({ time: new Date().toISOString(), path: p, v: newer(p) ? CLOUD_VERSION : API_VERSION, request: data, response: out.json });
       return send(res, 200, out);

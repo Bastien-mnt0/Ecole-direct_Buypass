@@ -35,7 +35,7 @@ function show(view) {
 const SESS = 'ed-session';
 const sess = {
   save() {
-    if (!S.token || !S.eleve) return;
+    if (S.out || !S.token || !S.eleve) return;
     const v = JSON.stringify({ t: S.token, c: S.cookies, e: S.eleves, i: S.eleves.indexOf(S.eleve), s: S.school, a: S.tab, ac: S.acc, at: Date.now() });
     try { window[S.keep ? 'localStorage' : 'sessionStorage'].setItem(SESS, v); window[S.keep ? 'sessionStorage' : 'localStorage'].removeItem(SESS); } catch {}
   },
@@ -173,7 +173,7 @@ $('#qcmGo').onclick = async () => {
     await login([{ cn: r.data.cn, cv: r.data.cv }]);
   } catch (e) { $('#qcmErr').textContent = e.message; }
 };
-$('#logout').onclick = async () => { await cloud.flush(); sess.clear(); location.reload(); };
+$('#logout').onclick = async () => { await cloud.flush(); S.out = true; clearTimeout(saveT); clearTimeout(cloud.timer); sess.clear(); location.reload(); };
 $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = null; S.hist = undefined; setWho(); sess.save(); openTab(S.tab); };
 
 // ---------- Onglets ----------

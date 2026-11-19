@@ -50,6 +50,32 @@ const okDest = (d) => okCloudPath(d) && d.startsWith('\\') && /(^|\\)mon cloud e
 const uploadFilePath = (dest) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(dest)}`;
 const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && typeof a.token === 'string' ? { token: a.token, cookies: a.cookies && typeof a.cookies === 'object' ? a.cookies : {} } : null; } catch { return null; } };
 
+// Liste blanche : seules les routes réellement utilisées par app.js sont relayées (le reste de l'API École Directe reste inaccessible).
+const ROUTES = [
+  /^\/v3\/login\.awp$/,
+  /^\/v3\/connexion\/doubleauth\.awp$/,
+  /^\/v3\/eleves\/\d+\/(notes|viescolaire|messages|cahierdetexte)\.awp$/i,
+  /^\/v3\/eleves\/\d+\/cahierdetexte\/\d{4}-\d{2}-\d{2}\.awp$/i,
+  /^\/v3\/(eleves|familles)\/\d+\/messages(\/[\w-]+)?\.awp$/i,
+  /^\/v3\/E\/\d+\/(emploidutemps|espacestravail)\.awp$/,
+  /^\/v3\/cloud\/[A-Z]\/[\w-]+(\/visibility)?\.awp$/,
+  /^\/v3\/comptes\/detail\.awp$/,
+  /^\/v3\/menusRestaurationScolaire\.awp$/,
+];
+const okRoute = (p) => {
+  const i = p.indexOf('?'), name = i < 0 ? p : p.slice(0, i), qs = i < 0 ? '' : p.slice(i + 1);
+  return ROUTES.some((r) => r.test(name)) && /^[\w%=&.\-~!*'()]*$/.test(qs) && !qs.includes('..') && !/%2e%2e/i.test(qs);
+};
+const isAuth = (p) => /\/(login|doubleauth)\.awp(\?|$)/.test(p);
+// Limitation de débit par adresse IP (en mémoire : propre à chaque instance du Worker, donc un garde-fou et non une garantie absolue).
+const hits = new Map();
+const limited = (ip, bucket, max, ms) => {
+  const now = Date.now(), k = bucket + ':' + ip, h = (hits.get(k) || []).filter((t) => now - t < ms);
+  h.push(now); hits.set(k, h);
+  if (hits.size > 5000) for (const [x, v] of hits) if (!v.length || now - v[v.length - 1] > 3600e3) hits.delete(x);
+  return h.length > max;
+};
+
 export default {
   async fetch(req, env) {
     const allowed = env.ALLOWED_ORIGIN || '';
@@ -58,16 +84,20 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (!allowed || req.headers.get('Origin') !== allowed) return reply({ error: 'origine refusée' }, 403);
     const { pathname } = new URL(req.url);
+    const ip = req.headers.get('CF-Connecting-IP') || 'inconnu', tooMany = () => reply({ error: 'Trop de requêtes : réessaie dans un instant' }, 429);
     try {
       if (req.method === 'POST' && pathname === '/api/gtk') {
+        if (limited(ip, 'login', 20, 600e3)) return tooMany();
         const r = await ed('/v3/login.awp?gtk=1', { method: 'GET' });
         return reply({ cookies: r.cookies });
       }
       if (req.method === 'POST' && pathname === '/api/ed') {
         const { path, data, token, cookies } = await req.json();
-        if (typeof path !== 'string' || !path.startsWith('/v3/')) return reply({ error: 'chemin refusé' }, 400);
+        if (typeof path !== 'string' || !okRoute(path)) return reply({ error: 'chemin refusé' }, 400);
+        if (isAuth(path) ? limited(ip, 'login', 20, 600e3) : limited(ip, 'api', 240, 60e3)) return tooMany();
         return reply(await ed(path, { token, data, cookies }));
       }
+      if (req.method === 'POST' && pathname.startsWith('/api/ed-') && limited(ip, 'file', 60, 60e3)) return tooMany();
       if (req.method === 'POST' && pathname === '/api/ed-upload') {
         const b = await req.json();
         if (!okUpload(b)) return reply({ error: 'envoi refusé' }, 400);

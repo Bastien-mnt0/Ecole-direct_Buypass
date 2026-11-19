@@ -38,7 +38,8 @@
     <label class="keep"><input type="checkbox" id="keep"> Rester connecté sur cet appareil</label>
     <button id="go">Se connecter</button>
     <div id="loginErr" class="err" role="alert"></div>
-    <p class="mute">Tes identifiants ne quittent pas ton ordinateur, sauf vers EcoleDirecte. Seul l'identifiant est mémorisé, jamais le mot de passe.</p>
+    <p class="mute">Tes identifiants transitent par le relais EDUNOTA pour atteindre EcoleDirecte ; le relais ne les enregistre pas. Le mot de passe n'est jamais mémorisé, seul l'identifiant l'est. Avec « Rester connecté », le jeton de session, les cookies et la liste des élèves sont aussi gardés sur cet appareil : le jeton donne accès au compte, ne coche donc pas cette case sur un appareil partagé.</p>
+    <p class="mute">EDUNOTA est un projet indépendant, non affilié à EcoleDirecte.</p>
   </section>
 
   <section id="qcm" class="card hidden">
@@ -58,6 +59,6 @@
 </div>
 
 <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle"><div class="mbox"><button type="button" class="mclose" aria-label="Fermer">×</button><h3 id="mtitle"></h3><div id="mbody"></div></div></div>
-<script src="app.js?v=51" defer></script>
+<script src="app.js?v=52" defer></script>
 </body>
 </html>

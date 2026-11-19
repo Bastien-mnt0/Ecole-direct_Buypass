@@ -50,7 +50,7 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces'].includes(v.a) ? v.a : 'home' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'viescolaire', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
@@ -150,11 +150,11 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 // ---------- Onglets ----------
 function openTab(name) {
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', viescolaire: 'Vie scolaire', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -393,7 +393,7 @@ function renderDash() {
     const pr = Array.from({ length: S.dN }, (_, i) => avg([...x.notes, ...hyp(x, i + 1)])).filter((v) => v != null);
     if (!ser.length) return '';
     const cur = ser[ser.length - 1], d = ser.length > 1 ? cur - ser[ser.length - 2] : 0, end = pr.length ? pr[pr.length - 1] : null;
-    return `<div class="scard"><header><div><b>${esc(x.name)}</b><div class="v" style="color:${color(cur)}">${fmt(cur)}</div></div><span class="chip ${d >= 0 ? 'up' : 'dn'}">${d >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(d))}</span></header>${chart(ser, pr, { small: true, label: x.name })}<div class="mute">${M.subj[norm(x.name)] ? `Historique : ${fmt(M.subj[norm(x.name)].h)} · ` : ''}Prévision : <b class="num ${end != null && end >= cur ? 'up' : 'dn'}">${fmt(end)}</b></div></div>`;
+    return `<div class="scard"><header><div><b title="${esc(x.name)}">${esc(x.name)}</b><div class="v" style="color:${color(cur)}">${fmt(cur)}</div></div><span class="chip ${d >= 0 ? 'up' : 'dn'}">${d >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(d))}</span></header>${chart(ser, pr, { small: true, label: x.name })}<div class="mute">${M.subj[norm(x.name)] ? `Historique : ${fmt(M.subj[norm(x.name)].h)} · ` : ''}Prévision : <b class="num ${end != null && end >= cur ? 'up' : 'dn'}">${fmt(end)}</b></div></div>`;
   }).join('');
   const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   $('#view').innerHTML = `<div class="ptabs">${tabs}</div>
@@ -1170,6 +1170,39 @@ async function ensureNotes() {
   if (r.code !== 200) throw new Error(r.message || 'Impossible de charger les notes');
   S.notes = r.data; S.periode = undefined;
 }
+// ---------- Vie scolaire École Directe ----------
+// Lecture seule : absences, retards, dispenses, punitions, sanctions, encouragements. Les données d'École Directe sont non fiables : tout est échappé.
+async function loadVie() {
+  const r = await api(`/v3/eleves/${S.eleve.id}/viescolaire.awp?verbe=get`, { anneeScolaire: '' });
+  const vide = r.code !== 200 && /aucune donn/i.test(String(r.message || ''));
+  if (r.code !== 200 && !vide) throw new Error(r.message || 'Vie scolaire indisponible (code ' + r.code + ')');
+  const d = (!vide && r.data) || {}, arr = (v) => (Array.isArray(v) ? v : []);
+  const typ = (x) => String(x.typeElement || x.type || '');
+  const isDisp = (x) => /dispens/i.test(typ(x));
+  const all = arr(d.absencesRetards), san = arr(d.sanctionsEncouragements);
+  const disp = arr(d.dispenses).concat(all.filter(isDisp));
+  const abs = all.filter((x) => !isDisp(x) && !/retard/i.test(typ(x))), ret = all.filter((x) => !isDisp(x) && /retard/i.test(typ(x)));
+  const day = (t) => (/^\d{4}-\d{2}-\d{2}/.test(String(t || '')) ? longDate(String(t).slice(0, 10)) : '');
+  const when = (x) => { const a = day(x.date || x.dateDebut), z = day(x.dateFin); return a ? (z && z !== a ? a + ' → ' + z : a) : String(x.displayDate || x.date || x.dateDebut || ''); };
+  const isJust = (x) => x.justifie === true || x.justifie === 'true';
+  const key = (x) => String(x.date || x.dateDebut || '');
+  const byDate = (a, b) => key(b).localeCompare(key(a));
+  const det = (x) => [x.libelle, x.motif, x.commentaire, x.matiere].filter((v) => v && String(v).trim()).map(String);
+  const absRow = (x, def) => { const j = isJust(x);
+    return `<div class="hrow"><span><b>${esc(typ(x) || def)}</b><span class="tag${j ? '' : ' tag-c'}">${j ? 'justifié' : 'non justifié'}</span><br><span class="mute">${esc(when(x))}${det(x).length ? ' · ' + esc(det(x).join(' · ')) : ''}</span></span></div>`; };
+  const dispRow = (x) => `<div class="hrow"><span><b>${esc(typ(x) || 'Dispense')}</b><br><span class="mute">${esc(when(x))}${det(x).length ? ' · ' + esc(det(x).join(' · ')) : ''}</span></span></div>`;
+  const sanRow = (x) => { const good = /encourag|félicit|valoris/i.test(typ(x));
+    return `<div class="hrow"><span><b>${esc(typ(x) || 'Élément')}</b><span class="tag${good ? '' : ' tag-c'}">${good ? 'positif' : 'à noter'}</span><br><span class="mute">${esc(when(x))}${x.par ? ' · par ' + esc(x.par) : ''}${det(x).length ? ' · ' + esc(det(x).join(' · ')) : ''}</span></span></div>`; };
+  const nbNJ = abs.concat(ret).filter((x) => !isJust(x)).length;
+  const k = (t, v, s) => `<div class="kpi"><small>${t}</small><b>${v}</b><small>${s || ''}</small></div>`;
+  const sec = (t, list, row, none) => `<div class="card"><h3>${t}</h3>${list.length ? list.slice().sort(byDate).map(row).join('') : `<p class="mute">${none}</p>`}</div>`;
+  if (S.tab !== 'viescolaire') return;
+  $('#view').innerHTML = `<div class="kpis">${k('Absences', abs.length)}${k('Retards', ret.length)}${k('Dispenses', disp.length)}${k('Non justifiés', nbNJ, nbNJ ? 'à régulariser' : 'tout est justifié')}${k('Sanctions / encouragements', san.length)}</div>
+    ${sec('Absences', abs, (x) => absRow(x, 'Absence'), 'Aucune absence.')}
+    ${sec('Retards', ret, (x) => absRow(x, 'Retard'), 'Aucun retard.')}
+    ${sec('Dispenses', disp, dispRow, 'Aucune dispense.')}
+    ${sec('Punitions, sanctions et encouragements', san, sanRow, 'Aucune punition, sanction ni encouragement.')}`;
+}
 // ---------- Messagerie École Directe ----------
 // Lecture seule (reçus, envoyés, archivés). Le contenu des messages est une donnée non fiable : il est nettoyé avant affichage.
 const MSG = { box: 'received', list: [], unread: 0 };
@@ -1576,7 +1609,7 @@ function wxMount(where) {
   if (!S.sport || S.tab !== where) return;
   if (where === 'edt') {
     const card = $('#view>.card'); if (!card) return;
-    const w = document.createElement('div'); w.className = 'sgrid'; card.replaceWith(w); w.append(card);
+    const w = document.createElement('div'); w.className = 'wgrid'; card.replaceWith(w); w.append(card);
     w.insertAdjacentHTML('beforeend', '<aside id="wx" class="panel wx"></aside>');
   } else {
     const first = $('.hgrid .panel'); if (!first) return;

@@ -95,8 +95,12 @@ td.r{text-align:right}
 .ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .ctrl select{width:auto}
 .sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:12px}
+.scard svg{width:100%;height:auto;display:block;margin:6px 0}
+.scard .mute{margin-top:2px}
 .scard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
 .scard header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.scard header>div{min-width:0;flex:1}
+.scard header b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scard .v{font-size:1.3rem;font-weight:700}
 .chip{font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:99px;white-space:nowrap}
 .chip.up{background:color-mix(in srgb,var(--good) 18%,transparent)}
@@ -214,9 +218,9 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hwb{margin:0;padding:4px 10px;font-size:.82rem;background:var(--card);color:var(--ink);border:1px solid var(--line)}
 .hwb.del{color:var(--bad);border-color:var(--bad)}.icon[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 #sport svg{display:block}
-.sgrid{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px;align-items:start}
-.sgrid>.card,.sgrid>.wx{margin-top:14px}
-.sgrid>.wx{position:sticky;top:62px}
+.wgrid{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px;align-items:start}
+.wgrid>.card,.wgrid>.wx{margin-top:14px}
+.wgrid>.wx{position:sticky;top:62px}
 .wx h3{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .wx h3 .link{margin:0;font-size:.8rem}
 a.link{display:inline-block;text-decoration:none}
@@ -234,7 +238,7 @@ a.link{display:inline-block;text-decoration:none}
 .lg{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .wxres{display:block;width:100%;margin:6px 0 0;background:var(--p2);color:var(--ink);border:1px solid var(--line);text-align:left;font-weight:600}
 .wxres small{display:block;color:var(--mute);font-weight:400}
-@media (max-width:760px){.sgrid{grid-template-columns:1fr}.sgrid>.wx{position:static;margin-top:0;padding:10px 12px}.sgrid>.card{padding:8px;margin-top:10px}
+@media (max-width:760px){.wgrid{grid-template-columns:1fr}.wgrid>.wx{position:static;margin-top:0;padding:10px 12px}.wgrid>.card{padding:8px;margin-top:10px}
  .wx h3{font-size:.85rem;margin-bottom:4px}
  .wxmain{gap:10px;margin:2px 0 8px}
  .wxt{font-size:1.8rem}

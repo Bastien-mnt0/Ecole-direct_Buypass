@@ -2,6 +2,7 @@
 // Sert public/index.html (page d'accueil EDUNOTA ; l'application École Directe est sur /ecoledirecte.html) et relaie les appels vers api.ecoledirecte.com (le navigateur ne peut pas les faire : CORS).
 // Sans état : les cookies font l'aller-retour avec le navigateur (utilisable par plusieurs sessions).
 const http = require('http');
+const zlib = require('zlib');
 const fs = require('fs');
 const path = require('path');
 
@@ -111,7 +112,9 @@ http.createServer(async (req, res) => {
       const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon' };
       const p = new URL(req.url, 'http://x').pathname, name = p === '/' ? 'index.html' : path.basename(p), file = path.join(__dirname, 'public', name);
       if (!types[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, 'introuvable', 'text/plain');
-      return send(res, 200, fs.readFileSync(file), types[path.extname(name)]);
+      const buf = fs.readFileSync(file), h = { 'Content-Type': types[path.extname(name)], 'Cache-Control': 'public, max-age=300' };
+      if (/\bgzip\b/.test(req.headers['accept-encoding'] || '') && buf.length > 1024 && /^\.(html|css|js)$/.test(path.extname(name))) { h['Content-Encoding'] = 'gzip'; res.writeHead(200, h); return res.end(zlib.gzipSync(buf)); }
+      res.writeHead(200, h); return res.end(buf);
     }
     send(res, 404, { error: 'introuvable' });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }

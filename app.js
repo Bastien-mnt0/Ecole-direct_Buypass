@@ -55,20 +55,48 @@ function restore() {
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
   $('#eleve').classList.toggle('hidden', S.eleves.length < 2);
-  setWho(); show('app'); openTab(S.tab); cloud.push(0);
+  setWho(); show('app'); openTab(S.tab); cloud.push(3000);
+}
+// Sauvegarde de session groupée : un seul enregistrement même si plusieurs réponses arrivent ensemble
+let saveT = 0;
+const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(() => sess.save(), 150); };
+addEventListener('pagehide', () => sess.save());
+// Appel réseau avec délai maximal (connexion lente = pas de chargement infini) et un nouvel essai pour les lectures
+async function post(url, body, tries) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    const ac = new AbortController(), to = setTimeout(() => ac.abort(), 25000);
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ac.signal });
+      if (r.status >= 500 && i < tries - 1) { last = new Error('relais indisponible'); await new Promise((ok) => setTimeout(ok, 600)); continue; }
+      return r;
+    } catch (e) { last = e; if (i < tries - 1) await new Promise((ok) => setTimeout(ok, 600)); } finally { clearTimeout(to); }
+  }
+  throw last && last.name === 'AbortError' ? new Error('Connexion trop lente : réessaie dans un instant') : last || new Error('Relais injoignable');
 }
 async function api(path, data) {
-  const r = await fetch(PROXY_URL + '/api/ed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, data, token: S.token, cookies: S.cookies }) });
+  const read = /verbe=get/.test(path) && !/login|doubleauth/.test(path); // les lectures peuvent être rejouées sans risque
+  const r = await post(PROXY_URL + '/api/ed', JSON.stringify({ path, data, token: S.token, cookies: S.cookies }), read ? 2 : 1);
   const o = await r.json().catch(() => ({ error: 'Relais injoignable : renseigne PROXY_URL dans index.html' }));
   if (o.error) throw new Error(o.error);
   if (o.token) S.token = o.token;
   if (o.cookies) S.cookies = o.cookies;
-  sess.save();
+  saveSoon();
   if ([520, 521, 525].includes(o.json.code)) {
     sess.clear(); show('login'); $('#loginErr').textContent = 'Session expirée : reconnecte-toi.';
     throw new Error('Session expirée');
   }
   return o.json;
+}
+// Lecture mise en cache (mémoire) : les appels identiques simultanés n'en font qu'un, et la réponse est réutilisée pendant « ttl » ms
+const memo = new Map();
+function apiCached(path, data, ttl = 45e3) {
+  const k = S.eleve.id + '|' + path + '|' + JSON.stringify(data || {}), c = memo.get(k);
+  if (c && Date.now() - c.t < ttl) return c.p;
+  const p = api(path, data);
+  memo.set(k, { p, t: Date.now() });
+  p.then((j) => { if (!j || j.code !== 200) memo.delete(k); }, () => memo.delete(k));
+  return p;
 }
 
 function setNav(open) {
@@ -102,7 +130,7 @@ async function login(fa = []) {
   sel.classList.toggle('hidden', S.eleves.length < 2);
   S.eleve = S.eleves[0]; S.notes = null; S.hist = undefined; S.school = acc.nomEtablissement || ''; S.acc = { id: acc.id, type: acc.typeCompte || 'E' }; setWho();
   S.keep = $('#keep').checked; store.set('ed-keep', S.keep); sess.save();
-  show('app'); openTab('home'); cloud.push(0);
+  show('app'); openTab('home'); cloud.push(3000);
 }
 
 async function startQcm() {
@@ -154,7 +182,7 @@ function openTab(name) {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); }, pm: loadPM })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(2500, true); return loadFiles(); }, pm: loadPM })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -164,7 +192,7 @@ const eur = (n) => (n == null || Number.isNaN(+n) ? '–' : (+n).toLocaleString(
 const pmDate = (d) => { const t = new Date(String(d || '').slice(0, 10) + 'T12:00:00'); return Number.isNaN(+t) ? '' : t.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
 const pmSign = (n) => `<b class="num" style="color:${n < 0 ? 'var(--bad)' : 'var(--good)'}">${n > 0 ? '+' : ''}${eur(n)}</b>`;
 async function loadPM() {
-  const r = await api('/v3/comptes/detail.awp?verbe=get', {});
+  const r = await apiCached('/v3/comptes/detail.awp?verbe=get', {}, 30e3);
   if (r.code !== 200) throw new Error(r.message || 'Porte-monnaie indisponible (code ' + r.code + ')');
   const all = Array.isArray(r.data && r.data.comptes) ? r.data.comptes : [];
   const mine = all.filter((c) => c && (c.idEleve == null || String(c.idEleve) === String(S.eleve.id)));
@@ -253,11 +281,7 @@ function spark(notes) {
 }
 
 async function loadNotes() {
-  if (!S.notes) {
-    const r = await api(`/v3/eleves/${S.eleve.id}/notes.awp?verbe=get`, { anneeScolaire: '' });
-    if (r.code !== 200) throw new Error(r.message || 'Impossible de charger les notes');
-    S.notes = r.data; S.periode = undefined;
-  }
+  await ensureNotes();
   renderNotes();
 }
 
@@ -356,9 +380,13 @@ function schoolYears(n) {
 // Récupère jusqu'à 3 années précédentes (si le compte y donne accès). Les erreurs sont ignorées.
 async function loadHistory() {
   if (S.hist) return S.hist;
+  const hk = 'ed-hist-' + S.eleve.id, hc = store.get(hk, null);
+  if (hc && Date.now() - hc.at < 7 * 864e5 && Array.isArray(hc.years)) return (S.hist = { years: hc.years });
   const res = await Promise.all(schoolYears(3).map((label) => api(`/v3/eleves/${S.eleve.id}/notes.awp?verbe=get`, { anneeScolaire: label })
     .then((r) => (r.code === 200 && (r.data?.notes || []).length ? { label, notes: r.data.notes, periodes: r.data.periodes || [] } : null)).catch(() => null)));
-  return (S.hist = { years: res.filter(Boolean) });
+  S.hist = { years: res.filter(Boolean) };
+  if (!res.length || res.some(Boolean)) store.set(hk, { at: Date.now(), years: S.hist.years });
+  return S.hist;
 }
 // Modèle : pour chaque matière, niveau habituel (moyenne pondérée des années, la plus récente compte le plus : 1, 0.6, 0.36)
 // et dérive habituelle entre le 1er trimestre et la fin d'année.
@@ -380,11 +408,7 @@ function buildModel() {
   return { years: ys.length, subj };
 }
 async function loadDash() {
-  if (!S.notes) {
-    const r = await api(`/v3/eleves/${S.eleve.id}/notes.awp?verbe=get`, { anneeScolaire: '' });
-    if (r.code !== 200) throw new Error(r.message || 'Impossible de charger les notes');
-    S.notes = r.data; S.periode = undefined;
-  }
+  await ensureNotes();
   await loadHistory();
   renderDash();
 }
@@ -450,14 +474,14 @@ function room(s) {
 const NOTHING = 'Aucun contrôle et devoir';
 async function hwList() {
   if (S.hw && S.hw.id === S.eleve.id) return S.hw;
-  const r = await api(`/v3/Eleves/${S.eleve.id}/cahierdetexte.awp?verbe=get`, {});
+  const r = await apiCached(`/v3/Eleves/${S.eleve.id}/cahierdetexte.awp?verbe=get`, {});
   S.hw = { id: S.eleve.id, list: r.code === 200 && r.data ? r.data : {}, days: {} };
   return S.hw;
 }
 async function hwDay(date) {
   const h = await hwList();
   if (!h.days[date]) {
-    const r = await api(`/v3/Eleves/${S.eleve.id}/cahierdetexte/${date}.awp?verbe=get`, {}).catch(() => null);
+    const r = await apiCached(`/v3/Eleves/${S.eleve.id}/cahierdetexte/${date}.awp?verbe=get`, {}, 120e3).catch(() => null);
     h.days[date] = r && r.code === 200 ? r.data?.matieres || [] : [];
   }
   return h.days[date];
@@ -569,7 +593,7 @@ async function hwRender() {
   $('#view').innerHTML = bar + body + '<p class="mute" id="cloudSt"></p>';
   cloud.paint();
 }
-const loadDevoirs = async () => { cloud.push(0, true); return hwRender(); };
+const loadDevoirs = async () => { cloud.push(2500, true); return hwRender(); };
 const hwApply = (fn) => { fn(); hwRender().catch((e) => { $('#appErr').textContent = e.message; }); };
 function hwPatch(key, patch) {
   const now = Date.now();
@@ -844,8 +868,8 @@ const cloud = {
     }
   },
 };
-document.addEventListener('visibilitychange', () => { if (document.hidden) cloud.flush(); else cloud.push(0, true); });
-addEventListener('online', () => cloud.push(0));
+document.addEventListener('visibilitychange', () => { if (document.hidden) cloud.flush(); else cloud.push(2500, true); });
+addEventListener('online', () => cloud.push(2000));
 // ---------- Onglet Cloud : fichiers personnels de l'élève dans son cloud École Directe ----------
 // Tout se passe dans le dossier « MON CLOUD EDUNOTA » (créé à la racine au premier affichage) : l'onglet n'affiche, n'écrit
 // et ne supprime rien en dehors. Parcours, aperçu et téléchargement réutilisent le lecteur de pièces jointes (docsHtml / fileBlob).
@@ -1194,14 +1218,15 @@ document.addEventListener('keydown', (e) => { const b = e.target.closest && e.ta
 // ---------- Accueil ----------
 async function ensureNotes() {
   if (S.notes) return;
-  const r = await api(`/v3/eleves/${S.eleve.id}/notes.awp?verbe=get`, { anneeScolaire: '' });
+  const id = S.eleve.id;
+  const r = await apiCached(`/v3/eleves/${id}/notes.awp?verbe=get`, { anneeScolaire: '' });
   if (r.code !== 200) throw new Error(r.message || 'Impossible de charger les notes');
-  S.notes = r.data; S.periode = undefined;
+  if (S.eleve.id === id && !S.notes) { S.notes = r.data; S.periode = undefined; }
 }
 // ---------- Vie scolaire École Directe ----------
 // Lecture seule : absences, retards, dispenses, punitions, sanctions, encouragements. Les données d'École Directe sont non fiables : tout est échappé.
 async function loadVie() {
-  const r = await api(`/v3/eleves/${S.eleve.id}/viescolaire.awp?verbe=get`, { anneeScolaire: '' });
+  const r = await apiCached(`/v3/eleves/${S.eleve.id}/viescolaire.awp?verbe=get`, { anneeScolaire: '' });
   const vide = r.code !== 200 && /aucune donn/i.test(String(r.message || ''));
   if (r.code !== 200 && !vide) throw new Error(r.message || 'Vie scolaire indisponible (code ' + r.code + ')');
   const d = (!vide && r.data) || {}, arr = (v) => (Array.isArray(v) ? v : []);
@@ -1308,7 +1333,7 @@ document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key ==
 // Routes (doc EduWireApps) : GET /v3/E/{id}/espacestravail.awp ; cloud de l'espace : /v3/cloud/W/{id}.awp (?idfolder= pour un sous-dossier)
 const WS = { list: [], cur: null, stack: [], tree: null };
 async function wsFetch() {
-  const r = await api(`/v3/E/${S.eleve.id}/espacestravail.awp?verbe=get`, {});
+  const r = await apiCached(`/v3/E/${S.eleve.id}/espacestravail.awp?verbe=get`, {});
   if (r.code !== 200) throw new Error(r.message || 'Espaces de travail indisponibles (code ' + r.code + ')');
   return (Array.isArray(r.data) ? r.data : []).filter((w) => w && w.id != null && (w.estMembre || w.estAdmin)); // seulement les espaces dont l'élève est membre
 }
@@ -1326,7 +1351,7 @@ function wsPaint() {
   cloud.paint();
 }
 async function loadSpaces() {
-  cloud.push(0, true);
+  cloud.push(2500, true);
   WS.list = await wsFetch();
   wsPaint();
 }
@@ -1415,13 +1440,21 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-ws]')) { e.preventDefault(); e.target.click(); } });
 async function loadHome() {
-  await ensureNotes();
+  const dayOf = nextSchoolDay(new Date()), dk0 = iso(dayOf);
+  const pre = {
+    notes: ensureNotes(),
+    edt: apiCached(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: dk0, dateFin: dk0, avecTrous: false }).catch(() => null),
+    msg: msgFetch('received').catch(() => null),
+    hw: hwList().then(async (h) => { await Promise.all(Object.keys(h.list).sort().slice(0, 4).map((d) => hwDay(d))); return h; }),
+  };
+  pre.hw.catch(() => {}); // évite une erreur non gérée si les notes échouent d'abord
+  await pre.notes;
   const periodes = (S.notes.periodes || []).filter((p) => !p.annuel);
   if (S.periode === undefined) S.periode = (periodes.find((p) => !p.cloture) || {}).codePeriode || '';
   ST = structure();
   const notes = (S.notes.notes || []).filter((n) => !S.periode || n.codePeriode === S.periode);
   const day = nextSchoolDay(new Date()), dkey = iso(day), isToday = dkey === iso(new Date());
-  const [hw, edt, mrec] = await Promise.all([hwList(), api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: dkey, dateFin: dkey, avecTrous: false }).catch(() => null), msgFetch('received').catch(() => null)]);
+  const [hw, edt, mrec] = await Promise.all([pre.hw, pre.edt, pre.msg]);
   if (mrec) { MSG.box = 'received'; MSG.list = mrec.list; MSG.unread = mrec.unread; }
   S.edtItems = edt && edt.code === 200 ? edtPrep(edt.data.sort((a, b) => a.start_date.localeCompare(b.start_date))) : [];
   const gser = [...new Set(notes.map((n) => n.date))].sort().map((d) => general(notes.filter((n) => n.date <= d))).filter((v) => v != null);
@@ -1479,7 +1512,7 @@ async function loadEdt() {
   const f = new Date(base); f.setDate(f.getDate() + S.dayOff); const focus = iso(f);
   const mon = new Date(day ? f : base); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7) + (day ? 0 : S.week * 7));
   const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-  const r = await api(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: iso(mon), dateFin: iso(sun), avecTrous: false });
+  const r = await apiCached(`/v3/E/${S.eleve.id}/emploidutemps.awp?verbe=get`, { dateDebut: iso(mon), dateFin: iso(sun), avecTrous: false });
   if (r.code !== 200) throw new Error(r.message || "Impossible de charger l'emploi du temps");
   await hwList(); S.edtItems = edtPrep(r.data);
   const min = (t) => +t.slice(11, 13) * 60 + +t.slice(14, 16);

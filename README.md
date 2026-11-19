@@ -13,6 +13,7 @@ Pour École Directe :
 - **Emploi du temps** (cours annulés, déplacés ou remplacés signalés).
 - **Messagerie** : messages reçus, envoyés et archivés, avec pièces jointes (lecture seule).
 - **Cahier de texte**, avec états et urgences des devoirs, et devoirs personnels.
+- **Espaces de travail** : liste des espaces dont tu es membre, résumé, et consultation / téléchargement des fichiers du cloud de l'espace (lecture seule).
 - **Cloud** : fichiers personnels dans le dossier « MON CLOUD EDUNOTA » de ton cloud École Directe (envoi, aperçu, téléchargement, renommer, corbeille, restauration), avec déplacement par glisser-déposer sur ordinateur ou par le bouton **Déplacer** sur mobile.
 - **Mode sportif** (affichage de la météo).
 

@@ -50,7 +50,7 @@ function restore() {
   const v = sess.load();
   if (!v) return;
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
-  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs', 'messages'].includes(v.a) ? v.a : 'home' });
+  Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
   $('#eleve').innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
   $('#eleve').value = String(S.eleves.indexOf(S.eleve));
@@ -150,11 +150,11 @@ $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = n
 // ---------- Onglets ----------
 function openTab(name) {
   S.tab = name; setNav(false);
-  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', cloud: 'Cloud' }[name];
+  $('#ptitle').textContent = { home: 'Accueil', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud' }[name];
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
-  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
+  ({ home: loadHome, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(0, true); return loadFiles(); } })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
 }
 document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
@@ -509,7 +509,7 @@ async function hwEntries() {
     const base = `ed:${d}:${t.id != null ? t.id : norm(t.matiere) + ':' + hwHash(t.text + (t.interro ? '#c' : ''))}`;
     const key = seen[base] ? `${base}~${seen[base]++}` : (seen[base] = 1, base);
     const o = saved[key] || {};
-    return { key, src: 'ed', date: d, matiere: t.matiere, text: t.text, interro: t.interro, docs: t.docs, st: o.st || (t.done ? 'done' : 'todo'), urg: o.urg || 'auto' };
+    return { key, src: 'ed', idDevoir: t.id, date: d, matiere: t.matiere, text: t.text, interro: t.interro, docs: t.docs, st: o.st || (t.done ? 'done' : 'todo'), urg: o.urg || 'auto' };
   }));
   const mine = store.get(hwKey('perso'), []).map((p) => ({ key: 'me:' + p.id, src: 'me', date: p.date, matiere: p.matiere, titre: p.titre, text: p.desc || '', interro: false, docs: [], st: p.st, urg: p.urg }));
   return sync.concat(mine).map((e) => ({ ...e, level: e.urg === 'auto' ? hwAuto(e.date) : e.urg }));
@@ -550,8 +550,20 @@ function hwPatch(key, patch) {
     const s = store.get(hwKey('etat'), {}), e = { ...s[key] };
     for (const [f, v] of Object.entries(patch)) { e[f] = v; e[f === 'st' ? 'ts' : 'tu'] = now; }
     s[key] = e; store.set(hwKey('etat'), s);
+    if (patch.st) hwEdDone(key, patch.st === 'done');
   }
   cloud.push();
+}
+// « Terminé » = « effectué » sur École Directe : le changement d'état est répercuté sur le devoir d'origine (cahierdetexte.awp?verbe=put)
+async function hwEdDone(key, done) {
+  const en = (S.hwAll || []).find((x) => x.key === key), id = en && en.idDevoir, h = S.hw;
+  if (id == null || !h) return;
+  const eleve = S.eleve.id;
+  try {
+    const r = await api(`/v3/Eleves/${eleve}/cahierdetexte.awp?verbe=put`, done ? { idDevoirsEffectues: [Number(id)], idDevoirsNonEffectues: [] } : { idDevoirsEffectues: [], idDevoirsNonEffectues: [Number(id)] });
+    if (r.code !== 200) throw new Error(r.message || 'code ' + r.code);
+    for (const l of Object.values(h.days || {})) for (const m of l) if (m.aFaire && String(m.aFaire.idDevoir) === String(id)) m.aFaire.effectue = done;
+  } catch (e) { if (e.message !== 'Session expirée') $('#appErr').textContent = 'École Directe : état « effectué » non mis à jour (' + e.message + '). Il reste enregistré ici.'; }
 }
 function hwForm(p) {
   const v = { titre: '', matiere: '', desc: '', date: iso(new Date()), urg: 'auto', st: 'todo', ...p };
@@ -594,7 +606,7 @@ document.addEventListener('change', (e) => {
 });
 // ---------- Synchronisation avec le cloud personnel École Directe ----------
 // Dossier « EDUNOTA » à la racine du cloud, contenant edunota.json : états, urgences et devoirs personnels.
-// Seules les données de l'app sont lues/écrites ; rien n'est jamais modifié côté devoirs / notes / EDT d'École Directe,
+// Seules les données de l'app sont lues/écrites ; seul l'état « effectué » des devoirs est répercuté sur École Directe (notes et EDT jamais modifiés),
 // et le fichier ne contient ni identifiant, ni mot de passe, ni jeton.
 // Les routes sont regroupées ici : ce sont les seules lignes à ajuster si le cloud École Directe change.
 const CLOUD = {
@@ -604,7 +616,7 @@ const CLOUD = {
   dest: (id) => String(id).replace(/^\\\\[^\\]+\\cloud(?=\\)/i, '').replace(/^\\\\/, '\\'),
   route: {
     list: (a, depth = 3) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { profondeur: depth } }), // profondeur : nombre de niveaux de sous-dossiers renvoyés (3 sur le site officiel)
-    open: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get`, data: { profondeur: 3, idFolder: node.id, parentNode: { ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: node.isTrash === true, children: [] } } }), // contenu d'un sous-dossier non chargé par la liste (à ajuster d'après la requête du site officiel si besoin)
+    open: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=get&idfolder=${encodeURIComponent(node.id)}`, data: { profondeur: 3 } }), // contenu d'un sous-dossier non chargé (isLoaded:false), paramètre « idfolder » de la doc EduWireApps
     mkdir: (a, name, root) => ({ path: `/v3/cloud/${a.type}/${a.id}.awp?verbe=post`, data: { parentNode: { ...root, children: [] }, libelle: name, typeRessource: 'folder' } }), // format relevé sur le site officiel
 
     del: (a, node) => ({ path: `/v3/cloud/${a.type}/${a.id}/visibility.awp?verbe=delete`, data: { tabNodes: [{ ...node, displayText: node.displayText ?? node.libelle, isLoaded: true, isTrash: false, children: [] }] } }), // 1re suppression : envoi dans la corbeille (route visibility.awp du site officiel) ; displayText et isLoaded comme sur le site officiel
@@ -647,7 +659,13 @@ function cleanDel(o) {
   for (const [k, v] of Object.entries(isObj(o) ? o : {})) if (/^[\w-]{1,40}$/.test(k) && num(v) > lim) out[k] = num(v);
   return out;
 }
-const cleanEleve = (e) => ({ etat: cleanEtat(e?.etat), perso: cleanPerso(e?.perso), del: cleanDel(e?.del) });
+// Espaces de travail masqués : { idEspace: { h: true|false, t: horodatage } }
+function cleanEsp(o) {
+  const out = {};
+  for (const [k, v] of Object.entries(isObj(o) ? o : {})) if (/^[\w-]{1,40}$/.test(k) && isObj(v) && typeof v.h === 'boolean') out[k] = { h: v.h, t: num(v.t) };
+  return out;
+}
+const cleanEleve = (e) => ({ etat: cleanEtat(e?.etat), perso: cleanPerso(e?.perso), del: cleanDel(e?.del), esp: cleanEsp(e?.esp) });
 // Conflits : le dernier à avoir modifié gagne, champ par champ pour les états (une urgence changée sur un appareil et un état
 // changé sur un autre sont tous deux conservés) ; égalité d'horodatage = version du cloud. Une suppression plus récente
 // qu'une modification l'emporte (pierre tombale), et inversement.
@@ -669,7 +687,9 @@ function mergeEleve(L, R) {
   for (const p of R.perso) byId.set(p.id, p);
   for (const p of L.perso) { const r = byId.get(p.id); if (!r || p.t > r.t) byId.set(p.id, p); }
   const perso = [...byId.values()].filter((p) => !(del[p.id] >= p.t && del[p.id] > 0)).sort((a, b) => a.id.localeCompare(b.id));
-  return { etat, perso, del };
+  const esp = { ...R.esp };
+  for (const [k, v] of Object.entries(L.esp)) if (!esp[k] || v.t > esp[k].t) esp[k] = v;
+  return { etat, perso, del, esp };
 }
 const cloud = {
   timer: null, cur: null, dirty: false, fails: 0, last: 0, st: null,
@@ -775,11 +795,11 @@ const cloud = {
       const merged = { ...remote };
       let changed = false;
       for (const id of ids) {
-        const L = cleanEleve({ etat: store.get(hwKeyFor(id, 'etat'), {}), perso: store.get(hwKeyFor(id, 'perso'), []), del: store.get(hwKeyFor(id, 'del'), {}) });
+        const L = cleanEleve({ etat: store.get(hwKeyFor(id, 'etat'), {}), perso: store.get(hwKeyFor(id, 'perso'), []), del: store.get(hwKeyFor(id, 'del'), {}), esp: store.get(hwKeyFor(id, 'esp'), {}) });
         const M = mergeEleve(L, remote[id] || cleanEleve({}));
         merged[id] = M;
         // mise à jour locale uniquement si le résultat diffère (évite des écritures et rendus inutiles)
-        for (const k of ['etat', 'perso', 'del']) {
+        for (const k of ['etat', 'perso', 'del', 'esp']) {
           if (canon(M[k]) !== canon(L[k])) { store.set(hwKeyFor(id, k), M[k]); changed = true; }
         }
       }
@@ -787,7 +807,8 @@ const cloud = {
         await cloud.write(a, dir, file, JSON.stringify({ app: CLOUD.dir, v: 1, maj: new Date().toISOString(), eleves: merged }));
       }
       cloud.fails = 0; cloud.last = Date.now(); cloud.set('ok');
-      if (changed && S.tab === 'devoirs' && !$('#modal').classList.contains('show')) hwRender().catch(() => {});
+      if (changed && S.tab === 'espaces' && !$('#modal').classList.contains('show')) wsPaint();
+      else if (changed && S.tab === 'devoirs' && !$('#modal').classList.contains('show')) hwRender().catch(() => {});
       else if (changed && S.tab === 'cloud' && !$('#modal').classList.contains('show') && !($('#clFile') && $('#clFile').disabled)) loadFiles().catch(() => {});
     } catch (e) {
       cloud.set('err', e.message || 'erreur inconnue');
@@ -1221,6 +1242,117 @@ document.addEventListener('click', (e) => {
   const m = e.target.closest('[data-m]'); if (m) msgOpen(m.dataset.m, m.dataset.box || 'received');
 });
 document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-m]')) { e.preventDefault(); msgOpen(e.target.dataset.m, e.target.dataset.box || 'received'); } });
+// ---------- Espaces de travail École Directe ----------
+// Lecture seule : liste des espaces, résumé, et cloud de l'espace (consultation et téléchargement).
+// Routes (doc EduWireApps) : GET /v3/E/{id}/espacestravail.awp ; cloud de l'espace : /v3/cloud/W/{id}.awp (?idfolder= pour un sous-dossier)
+const WS = { list: [], cur: null, stack: [], tree: null };
+async function wsFetch() {
+  const r = await api(`/v3/E/${S.eleve.id}/espacestravail.awp?verbe=get`, {});
+  if (r.code !== 200) throw new Error(r.message || 'Espaces de travail indisponibles (code ' + r.code + ')');
+  return (Array.isArray(r.data) ? r.data : []).filter((w) => w && w.id != null && (w.estMembre || w.estAdmin)); // seulement les espaces dont l'élève est membre
+}
+const wsTags = (w) => [w.estAdmin ? 'admin' : w.estMembre ? 'membre' : '', w.ouvert ? 'ouvert' : '', w.public ? 'public' : ''].filter(Boolean).map((t) => `<span class="tag">${t}</span>`).join('');
+const wsHideKey = () => hwKeyFor(S.eleve.id, 'esp');
+const wsHidden = (id) => !!(store.get(wsHideKey(), {})[id] || {}).h;
+const wsRow = (w) => `<div class="hrow" role="button" tabindex="0" data-ws="${esc(w.id)}" style="cursor:pointer"><span><b>${esc(w.titre || 'Espace sans titre')}</b> ${wsTags(w)}<br><span class="mute">${esc(w.creePar || '')}${w.nbMembres ? ' · ' + esc(w.nbMembres) + ' membre' + (w.nbMembres > 1 ? 's' : '') : ''}${w.cloud ? ' · ☁' : ''}${w.agenda ? ' · 📅' : ''}${w.discussion ? ' · 💬' : ''}</span></span><span style="text-align:right"><button type="button" class="pjb" data-wh="${wsHidden(w.id) ? 'show' : 'hide'}" data-id="${esc(w.id)}" title="${wsHidden(w.id) ? 'Réafficher cet espace' : 'Masquer cet espace (sans le quitter)'}">${wsHidden(w.id) ? 'Réafficher' : 'Masquer'}</button> <span class="mute">›</span></span></div>`;
+function wsPaint() {
+  if (S.tab !== 'espaces') return;
+  const vis = WS.list.filter((w) => !wsHidden(w.id)), hid = WS.list.filter((w) => wsHidden(w.id));
+  if (!hid.length) WS.showHidden = false;
+  const toggle = hid.length ? `<div class="card"><button type="button" class="pjb" data-wh="toggle">${WS.showHidden ? 'Cacher' : 'Afficher'} les espaces masqués (${hid.length})</button></div>` : '';
+  const hidden = WS.showHidden ? `<div class="card"><h3>Espaces masqués</h3>${hid.map(wsRow).join('')}</div>` : '';
+  $('#view').innerHTML = `<div class="card">${vis.length ? vis.map(wsRow).join('') : `<p class="mute">${WS.list.length ? 'Tous tes espaces sont masqués.' : 'Tu n’es membre d’aucun espace de travail.'}</p>`}</div>${toggle}${hidden}<p class="mute" id="cloudSt"></p>`;
+  cloud.paint();
+}
+async function loadSpaces() {
+  cloud.push(0, true);
+  WS.list = await wsFetch();
+  wsPaint();
+}
+// Masquer / réafficher : simple préférence d'affichage, l'élève reste membre de l'espace ; synchronisée dans edunota.json
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-wh]'); if (!b) return;
+  e.stopPropagation();
+  if (b.dataset.wh === 'toggle') WS.showHidden = !WS.showHidden;
+  else { const m = store.get(wsHideKey(), {}); m[b.dataset.id] = { h: b.dataset.wh === 'hide', t: Date.now() }; store.set(wsHideKey(), m); cloud.push(); }
+  wsPaint();
+}, true);
+// Cloud d'un espace : l'arbre est chargé une fois (profondeur 8), puis les dossiers non chargés (isLoaded:false ou vides) sont demandés à la demande.
+// Les dossiers sont retrouvés par leur id dans la réponse (la réponse d'un sous-dossier peut contenir toute la racine).
+const wsIsDir = (n) => isObj(n) && (n.type === 'folder' || /^(dossier|dir|directory)$/i.test(n.type || ''));
+const wsKids = (n) => (isObj(n) && Array.isArray(n.children) ? n.children.filter((c) => isObj(c) && c.id != null) : []);
+function wsFindId(t, id) {
+  const q = [t];
+  while (q.length) {
+    const n = q.shift();
+    if (Array.isArray(n)) { q.push(...n); continue; }
+    if (!isObj(n)) continue;
+    if (id != null && String(n.id) === String(id) && wsIsDir(n)) return n;
+    for (const v of Object.values(n)) if (v && typeof v === 'object') q.push(v);
+  }
+  return null;
+}
+async function wsFetch2(ws, folder) {
+  const r = await api(`/v3/cloud/W/${encodeURIComponent(ws.id)}.awp?verbe=get${folder ? '&idfolder=' + encodeURIComponent(folder) : ''}`, { profondeur: 8 });
+  if (r.code !== 200) throw new Error(r.message || 'Cloud indisponible (code ' + r.code + ')');
+  return r.data;
+}
+// Racine de l'arbre de l'espace (mise en cache pour la durée de la fenêtre)
+async function wsRoot(ws, force) {
+  if (WS.tree && WS.tree.ws === ws.id && !force) return WS.tree.root;
+  const d = await wsFetch2(ws, '');
+  const list = Array.isArray(d) ? d : [d];
+  const root = list.find(wsIsDir) || { type: 'folder', id: '', libelle: 'Cloud', children: [] };
+  WS.tree = { ws: ws.id, root };
+  return root;
+}
+// Chemin racine → dossier voulu (id nul ou vide = racine)
+function wsTrail(root, id) {
+  if (id == null || id === '' || String(root.id) === String(id)) return [root];
+  const walk = (n, trail) => {
+    const t = [...trail, n];
+    if (String(n.id) === String(id)) return t;
+    for (const c of wsKids(n)) if (wsIsDir(c)) { const r = walk(c, t); if (r) return r; }
+    return null;
+  };
+  return walk(root, []);
+}
+// Charge le contenu d'un sous-dossier si l'arbre ne l'a pas encore
+async function wsFill(ws, node) {
+  if (wsKids(node).length || node.isLoaded === true) return;
+  const d = await wsFetch2(ws, node.id);
+  const got = wsFindId(d, node.id), kids = got ? wsKids(got) : Array.isArray(d) ? d.filter((c) => isObj(c) && c.id != null && String(c.id) !== String(node.id)) : [];
+  node.children = kids; node.isLoaded = true;
+}
+function wsDetail(ws) {
+  let resume = ''; try { resume = ws.resume ? msgClean(b64(ws.resume)) : ''; } catch { resume = ''; }
+  $('#mtitle').textContent = ws.titre || 'Espace de travail';
+  $('#mbody').innerHTML = `<p class="mute">${wsTags(ws)} ${esc(ws.creePar || '')}${ws.nbMembres ? ' · ' + esc(ws.nbMembres) + ' membre' + (ws.nbMembres > 1 ? 's' : '') : ''}</p>${resume ? `<div class="msgb">${resume}</div>` : ''}${ws.cloud ? '<button type="button" class="pjb" data-wf="">Ouvrir le cloud de l’espace</button>' : ''}<div id="wsc"></div>`;
+}
+async function wsBrowse(folder) {
+  const ws = WS.cur; if (!ws) return;
+  const box = $('#wsc'); if (!box) return;
+  box.innerHTML = '<p class="mute">Chargement…</p>';
+  try {
+    const root = await wsRoot(ws);
+    let trail = wsTrail(root, folder);
+    if (!trail) { trail = [root]; }
+    const node = trail[trail.length - 1];
+    if (trail.length > 1) await wsFill(ws, node);
+    else if (!wsKids(root).length) { const r2 = await wsRoot(ws, true); trail = [r2]; }
+    const cur = trail[trail.length - 1], kids = wsKids(cur);
+    const byName = (a, b) => String(a.libelle).localeCompare(String(b.libelle), 'fr', { numeric: true });
+    const dirs = kids.filter(wsIsDir).sort(byName), fls = kids.filter((k) => !wsIsDir(k)).sort(byName);
+    const crumbs = trail.map((x, i) => i === trail.length - 1 ? `<b>${esc(i ? x.libelle : 'Cloud')}</b>` : `<button type="button" class="pjb" data-wf="${i ? esc(x.id) : ''}">${esc(i ? x.libelle : 'Cloud')}</button>`).join(' › ');
+    box.innerHTML = `<p class="mute" style="margin-top:12px">${crumbs}</p>${dirs.map((k) => `<button type="button" class="pjb" data-wf="${esc(k.id)}" style="display:block;width:100%;text-align:left;margin:4px 0">📁 ${esc(k.libelle)}</button>`).join('')}${docsHtml(fls.map((k) => ({ id: k.id, type: 'CLOUD', name: String(k.libelle) })))}${dirs.length || fls.length ? '' : '<p class="mute">Dossier vide.</p>'}`;
+  } catch (e) { if (e && e.message === 'Session expirée') modal.open(false); else box.innerHTML = `<div class="err" role="alert">${esc(e.message)}</div>`; }
+}
+document.addEventListener('click', (e) => {
+  const w = e.target.closest('[data-ws]');
+  if (w) { WS.cur = WS.list.find((x) => String(x.id) === w.dataset.ws) || null; WS.stack = []; WS.tree = null; if (WS.cur) { wsDetail(WS.cur); modal.open(true); } return; }
+  const f = e.target.closest('[data-wf]'); if (f && WS.cur) wsBrowse(f.dataset.wf);
+});
+document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-ws]')) { e.preventDefault(); e.target.click(); } });
 async function loadHome() {
   await ensureNotes();
   const periodes = (S.notes.periodes || []).filter((p) => !p.annuel);

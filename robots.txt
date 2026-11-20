@@ -1,0 +1,30 @@
+# EDUNOTA : seules les pages publiques d'information sont destinées à être indexées.
+# Attention : ce fichier n'est lu par les robots que s'il est servi à la racine du domaine.
+# Sur https://bastien-mnt0.github.io/Edunota/ (site « projet » GitHub Pages), il n'est donc pas pris en compte :
+# la page de l'application est protégée par <meta name="robots" content="noindex, nofollow"> dans ecoledirecte.html.
+# robots.txt n'est pas une protection de sécurité : il ne protège aucune donnée.
+
+User-agent: *
+Disallow: /Edunota/ecoledirecte.html
+Disallow: /ecoledirecte.html
+
+# Robots d'entraînement de modèles d'IA : non autorisés
+User-agent: GPTBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+Sitemap: https://bastien-mnt0.github.io/Edunota/sitemap.xml

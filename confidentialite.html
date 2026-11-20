@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Politique de confidentialité — EDUNOTA</title>
+<meta name="description" content="Quelles données EDUNOTA traite, où elles passent, combien de temps elles restent, et comment exercer tes droits.">
+<link rel="canonical" href="https://bastien-mnt0.github.io/Edunota/confidentialite.html">
+<link rel="icon" href="favicon.ico?v=2" sizes="any">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=2">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#0b0e11">
+<script>
+/* Applique le thème avant le rendu (même clé que l'application : ed-theme) */
+(function(){var t;try{t=JSON.parse(localStorage.getItem('ed-theme'))}catch(e){}
+if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+document.documentElement.dataset.theme=t})();
+</script>
+<link rel="stylesheet" href="edunota.css?v=2">
+</head>
+<body>
+<a class="skip" href="#top">Aller au contenu</a>
+<header class="nav">
+  <a class="logo" href="index.html" aria-label="EDUNOTA, retour à l'accueil"><img class="lg lg-dark" src="logo-dark.png" alt=""><img class="lg lg-light" src="logo-light.png" alt="">EDUNOTA</a>
+  <button id="theme" class="ghost" aria-label="Changer de thème" style="margin-left:auto">◐</button>
+</header>
+
+<main id="top">
+<article class="legal">
+<h1>Politique de confidentialité</h1>
+<p class="meta">Dernière mise à jour : 20 novembre 2026</p>
+
+<div class="box">
+<h2 style="margin-top:0">L'essentiel</h2>
+<ul>
+<li>EDUNOTA n'a <strong>ni compte, ni base de données</strong> : tes données scolaires ne sont pas enregistrées sur un serveur d'EDUNOTA.</li>
+<li>Ton identifiant et ton mot de passe passent par un <strong>relais technique</strong> (Cloudflare) pour être envoyés à EcoleDirecte. Le relais ne les enregistre pas. Ton mot de passe n'est jamais mémorisé.</li>
+<li>Ce qui est conservé reste <strong>sur ton appareil</strong> ou dans <strong>ton propre cloud EcoleDirecte</strong>.</li>
+<li>Pas de cookie, pas de publicité, pas de mesure d'audience.</li>
+<li>Tu peux tout effacer toi-même (voir « Effacer tes données »).</li>
+</ul>
+</div>
+
+<h2>1. Qui est responsable ?</h2>
+<p>EDUNOTA est édité à titre non professionnel par une personne physique (voir les <a href="mentions-legales.html">mentions légales</a>). Contact : <a href="mailto:edunota.fr@gmail.com">edunota.fr@gmail.com</a>.</p>
+<p>Pour fonctionner, EDUNOTA agit à ta demande : il se connecte à ton compte EcoleDirecte avec tes identifiants et affiche tes propres informations. Les données qui se trouvent dans EcoleDirecte (notes, messages, absences, etc.) restent sous la responsabilité de ton établissement et du service EcoleDirecte, qui appliquent leur propre politique de confidentialité. EDUNOTA n'a aucun accès à ces données en dehors de ta session. Pour le relais technique (le passage de tes identifiants et de tes requêtes vers EcoleDirecte), l'éditeur d'EDUNOTA est responsable du traitement au sens du RGPD, et Cloudflare intervient comme son sous-traitant.</p>
+
+<h2>2. Quelles données, où et combien de temps ?</h2>
+<div class="tw"><table>
+<thead><tr><th>Données</th><th>Parcours</th><th>Conservation</th></tr></thead>
+<tbody>
+<tr><td>Mot de passe EcoleDirecte</td><td>Ton navigateur, puis le relais, puis EcoleDirecte</td><td>Jamais conservé par EDUNOTA ni par le relais (le temps de la requête)</td></tr>
+<tr><td>Identifiant EcoleDirecte</td><td>Idem</td><td>Mémorisé sur ton appareil (stockage local du navigateur) pour pré-remplir le champ, <em>seulement</em> si tu coches « Rester connecté » : il est effacé quand tu te reconnectes sans cocher cette case, ou quand tu effaces les données du site</td></tr>
+<tr><td>Réponse à la question de double authentification</td><td>Idem</td><td>Non conservée</td></tr>
+<tr><td>Jeton de session, cookies techniques d'EcoleDirecte, liste des élèves du compte, nom de l'établissement</td><td>Reçus d'EcoleDirecte via le relais</td><td>Sur ton appareil : dans la session de l'onglet (effacée à la fermeture), ou dans le stockage local si tu coches « Rester connecté ». La session n'est plus reprise après 12 h d'inactivité. Effacés quand tu te déconnectes. Ne coche pas « Rester connecté » sur un appareil partagé : le jeton donne accès à ton compte.</td></tr>
+<tr><td>Données scolaires affichées : notes et moyennes, emploi du temps, cahier de texte, messages et pièces jointes, espaces de travail et leurs fichiers, vie scolaire (absences, retards, dispenses, punitions, sanctions, encouragements), porte-monnaie, menus de la cantine</td><td>EcoleDirecte, puis le relais, puis ton navigateur, à chaque ouverture d'un onglet</td><td>Gardées en mémoire de la page pendant ta session. Exceptions : les notes des années précédentes (utilisées pour l'onglet Analyse) sont copiées dans le stockage local de ton appareil et rafraîchies après 7 jours. Elles sont effacées à la déconnexion, quand la session expire et quand tu ouvres le site sans session active. Le texte lu dans les menus de cantine (qui ne te concerne pas personnellement) est aussi gardé localement.</td></tr>
+<tr><td>Devoirs personnels, états et urgences des devoirs, espaces de travail masqués</td><td>Ton navigateur, puis le relais, puis ton cloud EcoleDirecte</td><td>Stockage local de ton appareil, et fichier <code>edunota.json</code> dans le dossier « EDUNOTA » de ton cloud EcoleDirecte, pour synchroniser tes appareils. Ce fichier ne contient ni identifiant, ni mot de passe, ni jeton. Conservés jusqu'à ce que tu les supprimes.</td></tr>
+<tr><td>Fichiers que tu ajoutes dans l'onglet Cloud</td><td>Ton navigateur, puis le relais, puis ton cloud EcoleDirecte</td><td>Dans le dossier « MON CLOUD EDUNOTA » de ton cloud EcoleDirecte, jusqu'à suppression (corbeille d'EcoleDirecte comprise)</td></tr>
+<tr><td>Préférences : thème, Mode Sportif, ville et modèle météo, demi-pension, filtres des devoirs, choix « Rester connecté »</td><td>Ton navigateur</td><td>Stockage local de ton appareil, jusqu'à effacement</td></tr>
+<tr><td>Adresse IP et informations techniques de connexion</td><td>Vues par les prestataires techniques à chaque visite (voir §5)</td><td>EDUNOTA ne les enregistre pas. Le relais utilise l'adresse IP uniquement en mémoire pour limiter le nombre de requêtes. Durée de conservation chez les prestataires : fixée par chacun d'eux, selon sa propre politique de confidentialité.</td></tr>
+</tbody></table></div>
+<p>Les calculs de l'onglet Analyse (moyennes recalculées, évolution, prévisions) sont faits dans ton navigateur, à titre indicatif. Ils ne sont pas envoyés à un serveur et ne produisent aucune décision automatisée.</p>
+<p>Les données scolaires peuvent avoir de l'importance pour toi (résultats, absences, sanctions, messages). EDUNOTA ne les stocke pas, ne les analyse pas à ta place et ne les partage avec personne.</p>
+
+<h2>3. Pourquoi, et sur quelle base légale ?</h2>
+<ul>
+<li><strong>Te connecter à EcoleDirecte et afficher tes informations</strong>, mémoriser ta session et tes préférences : c'est le service que tu demandes (exécution du service, article 6.1.b du RGPD).</li>
+<li><strong>Protéger le relais contre les abus</strong> (limitation du nombre de requêtes par adresse IP) : intérêt légitime à garder le service et les comptes en sécurité (article 6.1.f du RGPD).</li>
+</ul>
+<p>EDUNOTA n'utilise tes données ni pour de la publicité, ni pour des statistiques d'audience, ni pour des communications, et ne les vend pas. Aucun consentement n'est demandé, car aucun traitement ne repose dessus.</p>
+
+<h2>4. Cookies et stockage local</h2>
+<p>EDUNOTA ne dépose aucun cookie. Il utilise le stockage local de ton navigateur (<em>localStorage</em> et <em>sessionStorage</em>) uniquement pour garder ta session ouverte, tes devoirs personnels et tes préférences : ces usages sont nécessaires au service que tu demandes. Il n'y a donc pas de bandeau de consentement. Tu peux vider ce stockage à tout moment depuis les paramètres de ton navigateur.</p>
+
+<h2>5. Prestataires et destinataires</h2>
+<div class="tw"><table>
+<thead><tr><th>Service</th><th>Rôle</th><th>Données reçues</th><th>Pays et garanties</th></tr></thead>
+<tbody>
+<tr><td>EcoleDirecte (Aplim SAS, RCS 403 315 815)</td><td>Fournisseur de tes données scolaires</td><td>Tes identifiants et toutes les requêtes de l'application</td><td>France : d'après la politique de confidentialité d'Aplim, les données d'EcoleDirecte sont hébergées sur des serveurs situés sur le territoire français.</td></tr>
+<tr><td>Cloudflare, Inc. (Workers)</td><td>Relais technique (sous-traitant d'EDUNOTA)</td><td>Tout ce qui passe entre l'application et EcoleDirecte, sans l'enregistrer ; adresse IP</td><td>États-Unis, réseau mondial. Garanties : Cloudflare est certifié au cadre de protection des données UE–États-Unis (Data Privacy Framework) et prévoit aussi les clauses contractuelles types de la Commission européenne dans son addendum de traitement des données. Métriques techniques agrégées par défaut (nombre de requêtes, erreurs).</td></tr>
+<tr><td>GitHub, Inc. (GitHub Pages)</td><td>Hébergement des pages du site</td><td>Adresse IP et informations de navigation à chaque visite</td><td>États-Unis. Garanties : GitHub s'appuie sur le cadre de protection des données UE–États-Unis (Data Privacy Framework) et sur les clauses contractuelles types de la Commission européenne.</td></tr>
+<tr><td>cdnjs (Cloudflare) et jsDelivr (Prospect One sp. z o.o.)</td><td>Fournissent les bibliothèques de lecture des menus (pdf.js, tesseract.js), chargées <em>uniquement</em> quand tu ouvres l'onglet Menu. Le menu est lu dans ton navigateur ; tesseract.js télécharge aussi ses fichiers de langue depuis jsDelivr.</td><td>Adresse IP, navigateur</td><td>Réseau mondial. cdnjs est exploité par Cloudflare (garanties ci-dessus) ; jsDelivr est exploité par une société établie dans l'Union européenne (Pologne).</td></tr>
+<tr><td>Open-Meteo (OpenMeteo GmbH)</td><td>Météo du Mode Sportif, <em>uniquement</em> si tu l'actives</td><td>Coordonnées de la ville choisie (Marseille par défaut), ville que tu cherches, adresse IP. Journaux supprimés après 90 jours d'après ses conditions.</td><td>Suisse (pays bénéficiant d'une décision d'adéquation de la Commission européenne)</td></tr>
+<tr><td>Google (Gmail)</td><td>Boîte email de contact</td><td>Les messages que tu m'envoies</td><td>Voir la politique de Google</td></tr>
+</tbody></table></div>
+
+<h2>6. Tes droits</h2>
+<p>Tu peux demander l'accès à tes données, leur rectification, leur effacement, la limitation ou l'opposition au traitement, et leur portabilité. EDUNOTA ne conservant pas tes données scolaires sur un serveur, l'essentiel se règle directement chez toi (voir ci-dessous) ou auprès d'EcoleDirecte et de ton établissement pour les données qui s'y trouvent.</p>
+<p>Pour exercer un droit auprès d'EDUNOTA : écris à <a href="mailto:edunota.fr@gmail.com">edunota.fr@gmail.com</a>. Nous répondons dans un délai d'un mois. Nous pouvons te demander de quoi vérifier que la demande vient bien de toi.</p>
+<p>Si tu estimes que tes droits ne sont pas respectés, tu peux saisir la CNIL : <a href="https://www.cnil.fr/fr/plaintes" rel="noopener">cnil.fr/fr/plaintes</a>.</p>
+
+<h2>7. Effacer tes données</h2>
+<ul>
+<li>Clique sur <strong>Déconnexion</strong> : la session et les copies de tes notes sont effacées de l'appareil.</li>
+<li>Efface les données du site depuis les paramètres de ton navigateur : cela supprime l'identifiant mémorisé, les préférences et les copies locales.</li>
+<li>Supprime le fichier <code>edunota.json</code> (dossier « EDUNOTA ») et les fichiers du dossier « MON CLOUD EDUNOTA » depuis ton cloud EcoleDirecte.</li>
+</ul>
+
+<h2>8. Sécurité</h2>
+<p>Les échanges sont chiffrés (HTTPS). Le relais ne transmet qu'une liste précise de requêtes vers EcoleDirecte et n'accepte que les requêtes venant du site EDUNOTA, avec une limitation du nombre de requêtes. Le contenu des messages est nettoyé avant d'être affiché. Aucun système n'est infaillible : n'utilise EDUNOTA que sur un appareil de confiance.</p>
+
+<h2>9. Mineurs</h2>
+<p>EDUNOTA s'adresse à des élèves, mineurs ou majeurs. Il utilise ton compte EcoleDirecte comme le ferait le site officiel, et ne te demande aucune autre information. Si tu es mineur, parles-en avec ton représentant légal avant d'utiliser le service.</p>
+
+<h2>10. Modifications</h2>
+<p>Cette politique peut évoluer, par exemple lors de l'ajout de Pronote. La date de dernière mise à jour est indiquée en haut de la page.</p>
+
+</article>
+</main>
+
+<footer class="foot">
+  <nav class="flinks" aria-label="Informations légales"><a href="index.html">Accueil</a><a href="mentions-legales.html">Mentions légales</a><a href="confidentialite.html" aria-current="page">Politique de confidentialité</a><a href="cgu.html">CGU</a><a href="mailto:edunota.fr@gmail.com">Contact</a></nav>
+  <p>Projet indépendant, non officiel, non affilié à EcoleDirecte (Aplim) ni à Pronote (Index Éducation). Les noms cités appartiennent à leurs propriétaires respectifs.</p>
+</footer>
+
+<script>
+document.getElementById('theme').onclick=function(){var r=document.documentElement,t=r.dataset.theme==='dark'?'light':'dark';r.dataset.theme=t;try{localStorage.setItem('ed-theme',JSON.stringify(t))}catch(e){}};
+</script>
+</body>
+</html>

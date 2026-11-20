@@ -9,13 +9,24 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=2">
 <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
 <meta name="theme-color" content="#0b0e11">
+<link rel="canonical" href="https://bastien-mnt0.github.io/Edunota/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="EDUNOTA">
+<meta property="og:locale" content="fr_FR">
+<meta property="og:title" content="EDUNOTA — Tes espaces scolaires, réunis">
+<meta property="og:description" content="EDUNOTA regroupe tes environnements scolaires dans une seule plateforme claire : notes, analyse, emploi du temps et cahier de texte. Gratuit, indépendant et non officiel.">
+<meta property="og:url" content="https://bastien-mnt0.github.io/Edunota/">
+<meta property="og:image" content="https://bastien-mnt0.github.io/Edunota/icon-192.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebApplication","name":"EDUNOTA","url":"https://bastien-mnt0.github.io/Edunota/","description":"Plateforme scolaire gratuite, indépendante et non officielle qui regroupe des environnements scolaires (EcoleDirecte) : notes, analyse, emploi du temps, cahier de texte.","applicationCategory":"EducationalApplication","operatingSystem":"Web","inLanguage":"fr","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"}}
+</script>
 <script>
 /* Applique le thème avant le rendu (même clé que l'application : ed-theme) */
 (function(){var t;try{t=JSON.parse(localStorage.getItem('ed-theme'))}catch(e){}
 if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
 document.documentElement.dataset.theme=t})();
 </script>
-<link rel="stylesheet" href="edunota.css?v=1">
+<link rel="stylesheet" href="edunota.css?v=2">
 </head>
 <body>
 
@@ -53,6 +64,7 @@ document.documentElement.dataset.theme=t})();
       <p class="eyebrow">Commencer</p>
       <h2>Choisis ton espace</h2>
       <p class="sub">Sélectionne l'environnement scolaire que tu utilises.</p>
+      <p class="sub">EDUNOTA est un projet indépendant et non officiel : il n'est affilié ni à EcoleDirecte (Aplim) ni à Pronote (Index Éducation).</p>
     </div>
     <div id="platforms" class="platforms"></div>
   </section>
@@ -111,7 +123,7 @@ document.documentElement.dataset.theme=t})();
       <h2>Pensé pour être simple et sûr</h2>
     </div>
     <div class="grid two">
-      <article class="adv"><h3>Respect de ta vie privée</h3><p>Tes identifiants ne sont envoyés qu'à ton espace scolaire. Seul l'identifiant peut être mémorisé, jamais le mot de passe.</p></article>
+      <article class="adv"><h3>Respect de ta vie privée</h3><p>Tes identifiants passent par le relais technique d'EDUNOTA pour atteindre ton espace scolaire, sans être enregistrés. Seul l'identifiant peut être mémorisé sur ton appareil, jamais le mot de passe. <a href="confidentialite.html">En savoir plus</a></p></article>
       <article class="adv"><h3>Clair et rapide</h3><p>Une interface sobre qui va à l'essentiel, sans surcharge visuelle.</p></article>
       <article class="adv"><h3>Partout avec toi</h3><p>Adapté aux ordinateurs, tablettes et téléphones.</p></article>
       <article class="adv"><h3>Prêt à s'étendre</h3><p>EDUNOTA est conçu comme une plateforme : de nouveaux environnements scolaires pourront s'y ajouter.</p></article>
@@ -122,7 +134,8 @@ document.documentElement.dataset.theme=t})();
 
 <footer class="foot">
   <span class="logo"><img class="lg lg-dark" src="logo-dark.png" alt=""><img class="lg lg-light" src="logo-light.png" alt="">EDUNOTA</span>
-  <p>Projet indépendant, non affilié à EcoleDirecte ni à Pronote. Les noms cités appartiennent à leurs propriétaires respectifs.</p>
+  <nav class="flinks" aria-label="Informations légales"><a href="mentions-legales.html">Mentions légales</a><a href="confidentialite.html">Politique de confidentialité</a><a href="cgu.html">CGU</a><a href="mailto:edunota.fr@gmail.com">Contact</a></nav>
+  <p>Projet indépendant, non officiel, non affilié à EcoleDirecte (Aplim) ni à Pronote (Index Éducation). Les noms cités appartiennent à leurs propriétaires respectifs.</p>
 </footer>
 
 <script src="edunota.js?v=1"></script>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mentions légales — EDUNOTA</title>
+<meta name="description" content="Éditeur, hébergeurs et contact d'EDUNOTA, plateforme scolaire indépendante et gratuite.">
+<link rel="canonical" href="https://bastien-mnt0.github.io/Edunota/mentions-legales.html">
+<link rel="icon" href="favicon.ico?v=2" sizes="any">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=2">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#0b0e11">
+<script>
+/* Applique le thème avant le rendu (même clé que l'application : ed-theme) */
+(function(){var t;try{t=JSON.parse(localStorage.getItem('ed-theme'))}catch(e){}
+if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+document.documentElement.dataset.theme=t})();
+</script>
+<link rel="stylesheet" href="edunota.css?v=2">
+</head>
+<body>
+<a class="skip" href="#top">Aller au contenu</a>
+<header class="nav">
+  <a class="logo" href="index.html" aria-label="EDUNOTA, retour à l'accueil"><img class="lg lg-dark" src="logo-dark.png" alt=""><img class="lg lg-light" src="logo-light.png" alt="">EDUNOTA</a>
+  <button id="theme" class="ghost" aria-label="Changer de thème" style="margin-left:auto">◐</button>
+</header>
+
+<main id="top">
+<article class="legal">
+<h1>Mentions légales</h1>
+<p class="meta">Dernière mise à jour : 20 novembre 2026</p>
+
+<h2>Éditeur du site</h2>
+<p>Le site EDUNOTA est édité à titre non professionnel par une personne physique qui a choisi de rester anonyme, conformément à l'article 6, III, 2 de la loi n° 2004-575 du 21 juin 2004 pour la confiance dans l'économie numérique (LCEN). Son identité a été communiquée aux hébergeurs indiqués ci-dessous.</p>
+<p>EDUNOTA est entièrement gratuit : le site ne comporte ni publicité, ni vente, ni abonnement, ni activité commerciale.</p>
+<p>Directeur de la publication : l'éditeur du site.</p>
+
+<h2>Contact</h2>
+<p>Pour toute question, signalement ou demande relative à tes données personnelles : <a href="mailto:edunota.fr@gmail.com">edunota.fr@gmail.com</a>.</p>
+<p>N'écris jamais ton mot de passe dans un message.</p>
+
+<h2>Hébergeur du site</h2>
+<p>Les pages du site sont hébergées par <strong>GitHub, Inc.</strong> (service GitHub Pages), 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, États-Unis. Site : <a href="https://github.com" rel="noopener">github.com</a>.</p>
+
+<h2>Relais technique (Cloudflare Workers)</h2>
+<p>Les échanges entre EDUNOTA et EcoleDirecte passent par un relais technique fourni par <strong>Cloudflare, Inc.</strong> (service Cloudflare Workers), 101 Townsend Street, San Francisco, CA 94107, États-Unis. Ce relais n'héberge aucune page du site : il transmet uniquement les requêtes de l'application vers l'API d'EcoleDirecte. Il ne fait donc pas partie de l'hébergement du site, mais il traite des données en transit : voir la <a href="confidentialite.html">politique de confidentialité</a>.</p>
+
+<h2>Indépendance vis-à-vis des services scolaires</h2>
+<p>EDUNOTA est un projet indépendant et non officiel. Il n'est ni affilié à, ni approuvé, ni sponsorisé par la société Aplim (SAS), qui édite EcoleDirecte, ni par la société Index Éducation, qui édite Pronote. Les noms « EcoleDirecte » et « Pronote » appartiennent à leurs propriétaires respectifs et ne sont cités que pour désigner les services avec lesquels EDUNOTA fonctionne ou fonctionnera.</p>
+<p>Les informations affichées dans EDUNOTA proviennent des services scolaires eux-mêmes. En cas de doute ou de différence, seules les informations de ton espace scolaire officiel font foi.</p>
+
+<h2>Propriété intellectuelle</h2>
+<p>Le nom EDUNOTA, son logo, son identité visuelle, son interface et les textes du site sont protégés et demeurent la propriété de leur auteur.</p>
+<p>Le code source du projet est publié sur GitHub sous licence <strong>PolyForm Noncommercial 1.0.0</strong>. Cette licence autorise notamment la consultation, la modification et la redistribution du code à des fins non commerciales. Toute utilisation commerciale nécessite une autorisation préalable de l'auteur.</p>
+<p>La licence est consultable à l'adresse suivante : <a href="https://polyformproject.org/licenses/noncommercial/1.0.0/" rel="noopener">PolyForm Noncommercial 1.0.0</a>.</p>
+
+<h2>Données personnelles</h2>
+<p>Le traitement des données personnelles est décrit dans la <a href="confidentialite.html">politique de confidentialité</a>. EDUNOTA n'utilise aucun cookie.</p>
+
+<h2>Conditions d'utilisation</h2>
+<p>L'utilisation du service est encadrée par les <a href="cgu.html">conditions générales d'utilisation</a>.</p>
+
+</article>
+</main>
+
+<footer class="foot">
+  <nav class="flinks" aria-label="Informations légales"><a href="index.html">Accueil</a><a href="mentions-legales.html" aria-current="page">Mentions légales</a><a href="confidentialite.html">Politique de confidentialité</a><a href="cgu.html">CGU</a><a href="mailto:edunota.fr@gmail.com">Contact</a></nav>
+  <p>Projet indépendant, non officiel, non affilié à EcoleDirecte (Aplim) ni à Pronote (Index Éducation). Les noms cités appartiennent à leurs propriétaires respectifs.</p>
+</footer>
+
+<script>
+document.getElementById('theme').onclick=function(){var r=document.documentElement,t=r.dataset.theme==='dark'?'light':'dark';r.dataset.theme=t;try{localStorage.setItem('ed-theme',JSON.stringify(t))}catch(e){}};
+</script>
+</body>
+</html>

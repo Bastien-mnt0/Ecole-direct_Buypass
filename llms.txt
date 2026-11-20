@@ -1,0 +1,43 @@
+# EDUNOTA
+
+> EDUNOTA est une plateforme scolaire gratuite, indépendante et non officielle, qui regroupe plusieurs environnements scolaires dans une interface unique. Aujourd'hui, seul EcoleDirecte est disponible ; Pronote est annoncé « bientôt » mais n'est pas disponible.
+
+## Fonctionnement
+
+- L'élève se connecte avec son propre compte EcoleDirecte sur la page d'application. EDUNOTA n'a pas de compte propre.
+- Les requêtes passent par un relais technique (Cloudflare Workers) vers l'API d'EcoleDirecte. EDUNOTA n'a ni base de données ni stockage serveur : les identifiants et les données scolaires ne sont pas enregistrés côté serveur.
+- Ce qui est conservé reste dans le navigateur de l'utilisateur (stockage local) ou dans son propre cloud EcoleDirecte (dossiers « EDUNOTA » et « MON CLOUD EDUNOTA »).
+- Aucun cookie, aucune publicité, aucune mesure d'audience.
+
+## Public
+
+Élèves, mineurs et majeurs, de tous les établissements utilisant EcoleDirecte.
+
+## Gratuité et indépendance
+
+EDUNOTA est entièrement gratuit (aucun paiement, abonnement ou vente de données). Il est édité à titre non professionnel, n'est pas un service officiel et n'est affilié ni à EcoleDirecte (Aplim) ni à Pronote (Index Éducation).
+
+## Fonctionnalités disponibles pour EcoleDirecte
+
+- Accueil : résumé (moyenne, prochains cours, devoirs, dernières notes, messages)
+- Notes et moyennes recalculées, avec analyse et prévisions indicatives
+- Emploi du temps (cours annulés, déplacés ou remplacés signalés)
+- Messagerie en lecture seule, avec pièces jointes
+- Cahier de texte, états et urgences des devoirs, devoirs personnels
+- Vie scolaire (absences, retards, dispenses, punitions, sanctions, encouragements)
+- Espaces de travail et leurs fichiers (lecture seule)
+- Cloud personnel (envoi, aperçu, téléchargement, renommage, corbeille)
+- Menus de la cantine, porte-monnaie, Mode Sportif (météo), thème clair et sombre
+
+## Pages publiques
+
+- [Accueil](https://bastien-mnt0.github.io/Edunota/): présentation et choix de l'espace scolaire
+- [Mentions légales](https://bastien-mnt0.github.io/Edunota/mentions-legales.html)
+- [Politique de confidentialité](https://bastien-mnt0.github.io/Edunota/confidentialite.html)
+- [Conditions générales d'utilisation](https://bastien-mnt0.github.io/Edunota/cgu.html)
+
+## Limites
+
+- Service non officiel : il dépend d'EcoleDirecte, qui peut modifier ou bloquer son accès à tout moment. Disponibilité non garantie.
+- Les moyennes recalculées et les prévisions sont indicatives ; seules les informations d'EcoleDirecte font foi.
+- La page d'application et les espaces connectés contiennent des données scolaires personnelles : ils ne sont pas destinés à l'indexation ni à l'exploration automatisée, et aucun identifiant ne doit être saisi par un agent.

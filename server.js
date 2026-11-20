@@ -13,9 +13,9 @@ const CLOUD_VERSION = process.env.ED_CLOUD_VERSION || '4.104.4'; // version util
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 // Journal local des échanges avec l'API (désactivé par défaut) : ED_LOG=1 node server.js
-// Écrit dans captures/AAAA-MM-JJ.jsonl (ignoré par git, voir .gitignore). Mots de passe, jetons et cookies sont masqués.
+// Écrit dans captures/AAAA-MM-JJ.jsonl (ignoré par git, voir .gitignore). Identifiants, mots de passe, jetons et cookies sont masqués, mais les données scolaires (notes, messages…) y figurent : fichier personnel, à ne jamais partager.
 const LOG = process.env.ED_LOG === '1';
-const SECRET = /^(motdepasse|token|cookies|gtk|cn|cv|fa|uuid)$/i;
+const SECRET = /^(identifiant|motdepasse|token|cookies|gtk|cn|cv|fa|uuid)$/i;
 const redact = (v) => Array.isArray(v) ? v.map(redact) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, SECRET.test(k) ? '***' : redact(x)])) : v;
 function record(entry) {
   const dir = path.join(__dirname, 'captures');
@@ -69,7 +69,7 @@ const uploadFilePath = (dest) => `/v3/televersement.awp?verbe=post&mode=CLOUD&de
 const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && typeof a.token === 'string' ? { token: a.token, cookies: a.cookies && typeof a.cookies === 'object' ? a.cookies : {} } : null; } catch { return null; } };
 
 const readBody = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => ok(b ? JSON.parse(b) : {})); });
-const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
+const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
 
 // Liste blanche : seules les routes réellement utilisées par app.js sont relayées (le reste de l'API École Directe reste inaccessible).
 const ROUTES = [

@@ -48,7 +48,10 @@ const uploadPath = (b) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${en
 const MAX_UP = 10.5e6; // 10 Mo de fichier + enveloppe multipart
 const okDest = (d) => okCloudPath(d) && d.startsWith('\\') && /(^|\\)mon cloud edunota(\\|$)/i.test(d); // uniquement dans le dossier « MON CLOUD EDUNOTA » (insensible à la casse, pour l'ancien dossier en minuscules) de l'élève
 const uploadFilePath = (dest) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(dest)}`;
-const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && typeof a.token === 'string' ? { token: a.token, cookies: a.cookies && typeof a.cookies === 'object' ? a.cookies : {} } : null; } catch { return null; } };
+// Jeton et cookies fournis par le navigateur : type et caractères contrôlés avant d'être renvoyés à École Directe (les entrées invalides sont ignorées).
+const cleanToken = (t) => (typeof t === 'string' && /^[\x21-\x7e]{1,4096}$/.test(t) ? t : undefined);
+const cleanCookies = (c) => { const o = {}; if (c && typeof c === 'object' && !Array.isArray(c)) for (const [k, v] of Object.entries(c).slice(0, 30)) if (/^[\w.\-]{1,64}$/.test(k) && typeof v === 'string' && /^[^\s;\u0000-\u001f]{0,2048}$/u.test(v)) o[k] = v; return o; };
+const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && cleanToken(a.token) ? { token: cleanToken(a.token), cookies: cleanCookies(a.cookies) } : null; } catch { return null; } };
 
 // Liste blanche : seules les routes réellement utilisées par app.js sont relayées (le reste de l'API École Directe reste inaccessible).
 const ROUTES = [
@@ -79,13 +82,14 @@ const limited = (ip, bucket, max, ms) => {
 export default {
   async fetch(req, env) {
     const allowed = env.ALLOWED_ORIGIN || '';
-    const cors = { 'Access-Control-Allow-Origin': allowed, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Ed-Auth', 'Access-Control-Expose-Headers': 'X-Token', Vary: 'Origin' };
+    const cors = { 'Access-Control-Allow-Origin': allowed, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Ed-Auth', 'Access-Control-Expose-Headers': 'X-Token', Vary: 'Origin', 'Access-Control-Max-Age': '86400', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
     const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (!allowed || req.headers.get('Origin') !== allowed) return reply({ error: 'origine refusée' }, 403);
     const { pathname } = new URL(req.url);
     const ip = req.headers.get('CF-Connecting-IP') || 'inconnu', tooMany = () => reply({ error: 'Trop de requêtes : réessaie dans un instant' }, 429);
     try {
+      if (req.method === 'POST' && pathname !== '/api/ed-upload-file' && (Number(req.headers.get('Content-Length')) || 0) > 1e6) return reply({ error: 'Requête trop volumineuse' }, 413);
       if (req.method === 'POST' && pathname === '/api/gtk') {
         if (limited(ip, 'login', 20, 600e3)) return tooMany();
         const r = await ed('/v3/login.awp?gtk=1', { method: 'GET' });
@@ -95,13 +99,13 @@ export default {
         const { path, data, token, cookies } = await req.json();
         if (typeof path !== 'string' || !okRoute(path)) return reply({ error: 'chemin refusé' }, 400);
         if (isAuth(path) ? limited(ip, 'login', 20, 600e3) : limited(ip, 'api', 240, 60e3)) return tooMany();
-        return reply(await ed(path, { token, data, cookies }));
+        return reply(await ed(path, { token: cleanToken(token), data, cookies: cleanCookies(cookies) }));
       }
       if (req.method === 'POST' && pathname.startsWith('/api/ed-') && limited(ip, 'file', 60, 60e3)) return tooMany();
       if (req.method === 'POST' && pathname === '/api/ed-upload') {
         const b = await req.json();
         if (!okUpload(b)) return reply({ error: 'envoi refusé' }, 400);
-        return reply(await ed(uploadPath(b), { token: b.token, cookies: b.cookies, form: uploadForm(b) }));
+        return reply(await ed(uploadPath(b), { token: cleanToken(b.token), cookies: cleanCookies(b.cookies), form: uploadForm(b) }));
       }
       if (req.method === 'POST' && pathname === '/api/ed-upload-file') {
         const dest = new URL(req.url).searchParams.get('dest'), type = req.headers.get('Content-Type') || '', auth = readAuth(req.headers.get('X-Ed-Auth')), len = Number(req.headers.get('Content-Length')) || 0;
@@ -114,7 +118,7 @@ export default {
       if (req.method === 'POST' && pathname === '/api/ed-file') {
         const { id, type, token, cookies } = await req.json();
         if (!okFileId(id, type) || !/^[A-Z_]+$/.test(String(type))) return reply({ error: 'fichier refusé' }, 400);
-        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token, cookies, data: type === 'FICHIER_MENU_RESTAURATION' ? { forceDownload: 0, idEtab: 0 } : {}, raw: true });
+        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token: cleanToken(token), cookies: cleanCookies(cookies), data: type === 'FICHIER_MENU_RESTAURATION' ? { forceDownload: 0, idEtab: 0 } : {}, raw: true });
         const ct = out.res.headers.get('content-type') || '';
         if (!out.res.ok || ct.includes('json')) {
           const j = await out.res.json().catch(() => ({}));
@@ -126,6 +130,6 @@ export default {
         return new Response(out.res.body, { status: 200, headers: h });
       }
       return reply({ error: 'introuvable' }, 404);
-    } catch (e) { return reply({ error: String(e.message || e) }, 500); }
+    } catch { return reply({ error: 'Erreur du relais' }, 500); }
   },
 };

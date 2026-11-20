@@ -38,7 +38,7 @@ const SESS = 'ed-session';
 const purgeHist = () => { try { Object.keys(localStorage).filter((k) => k.startsWith('ed-hist-')).forEach((k) => localStorage.removeItem(k)); } catch {} };
 const sess = {
   save() {
-    if (S.out || !S.token || !S.eleve) return;
+    if (S.out || S.demo || !S.token || !S.eleve) return; // la session de démonstration n'est jamais enregistrée
     const v = JSON.stringify({ t: S.token, c: S.cookies, e: S.eleves, i: S.eleves.indexOf(S.eleve), s: S.school, a: S.tab, ac: S.acc, at: Date.now() });
     try { window[S.keep ? 'localStorage' : 'sessionStorage'].setItem(SESS, v); window[S.keep ? 'sessionStorage' : 'localStorage'].removeItem(SESS); } catch {}
   },
@@ -67,6 +67,7 @@ const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(() => sess.save
 addEventListener('pagehide', () => sess.save());
 // Appel réseau avec délai maximal (connexion lente = pas de chargement infini) et un nouvel essai pour les lectures
 async function post(url, body, tries) {
+  if (S.demo) throw new Error('Session de démonstration : aucun appel réseau');
   let last;
   for (let i = 0; i < tries; i++) {
     const ac = new AbortController(), to = setTimeout(() => ac.abort(), 25000);
@@ -79,6 +80,7 @@ async function post(url, body, tries) {
   throw last && last.name === 'AbortError' ? new Error('Connexion trop lente : réessaie dans un instant') : last || new Error('Relais injoignable');
 }
 async function api(path, data) {
+  if (S.demo) return window.EdunotaDemo.api(path, data); // démonstration : données fictives locales, aucun appel réseau
   const read = /verbe=get/.test(path) && !/login|doubleauth/.test(path); // les lectures peuvent être rejouées sans risque
   const r = await post(PROXY_URL + '/api/ed', JSON.stringify({ path, data, token: S.token, cookies: S.cookies }), read ? 2 : 1);
   const o = await r.json().catch(() => ({ error: 'Relais injoignable : réessaie dans un instant.' }));
@@ -93,6 +95,8 @@ async function api(path, data) {
   return o.json;
 }
 // Lecture mise en cache (mémoire) : les appels identiques simultanés n'en font qu'un, et la réponse est réutilisée pendant « ttl » ms
+// Appels de fichiers / cloud vers le relais : remplacés par la démonstration quand elle est ouverte
+const net = (url, opts) => (S.demo ? window.EdunotaDemo.fetch(url, opts) : fetch(url, opts));
 const memo = new Map();
 function apiCached(path, data, ttl = 45e3) {
   const k = S.eleve.id + '|' + path + '|' + JSON.stringify(data || {}), c = memo.get(k);
@@ -145,10 +149,42 @@ async function startQcm() {
   show('qcm');
 }
 
+// ---------- Session de démonstration (compte fictif, aucun appel École Directe) ----------
+// Les identifiants ne figurent pas en clair : seules des empreintes PBKDF2 sont conservées. La comparaison est faite avant
+// toute requête réseau, et uniquement sur la saisie exacte (aucune normalisation : une variante n'ouvre pas la démonstration).
+// Une variante de l'identifiant de démonstration n'est jamais transmise à École Directe : refus local, message générique.
+const DEMO = { salt: '631a9e1f2d18d40171bd1ea22bc218f4', pair: 'bc061b7a27e9422a99bc8deadbea396b7e4de681d8f7719cf6f3b5d8e3d58663', idn: '27260f71b46d73cb6b4adea67d0ebf327721b91b7e4854c7ab31e3ccad64e225', iter: 100000 };
+async function demoHash(text) {
+  const salt = Uint8Array.from(DEMO.salt.match(/../g).map((h) => parseInt(h, 16)));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(text), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: DEMO.iter }, key, 256);
+  return [...new Uint8Array(bits)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+async function demoGate(id, pw) { // 'demo' = identifiants exacts ; 'blocked' = variante de l'identifiant ; null = connexion normale
+  try {
+    if (!(window.crypto && crypto.subtle)) return null;
+    if ((await demoHash('id\n' + String(id).trim().normalize('NFKC').toLowerCase())) !== DEMO.idn) return null;
+    return (await demoHash(String(id) + '\n' + String(pw))) === DEMO.pair ? 'demo' : 'blocked';
+  } catch { return null; }
+}
+const demoPurge = () => { try { Object.keys(localStorage).filter((k) => k.endsWith(':demo') || k === 'ed-hist-demo').forEach((k) => localStorage.removeItem(k)); } catch {} }; // préférences et devoirs de la démonstration, séparés de ceux des vrais comptes
+async function startDemo() {
+  if (!window.EdunotaDemo) await new Promise((ok, ko) => { const s = document.createElement('script'); s.src = 'demo.js?v=1'; s.onload = ok; s.onerror = () => ko(new Error('Connexion impossible : réessaie dans un instant.')); document.head.appendChild(s); });
+  const acc = window.EdunotaDemo.account();
+  demoPurge();
+  Object.assign(S, { demo: true, cookies: {}, token: 'demo-local', eleves: [acc], eleve: acc, notes: null, hist: undefined, hw: null, school: acc.nomEtablissement, acc: { id: acc.id, type: 'E' }, keep: false, periode: undefined });
+  CF.t = null; CF.cur = null; CF.bin = false; CF.path = [];
+  $('#pw').value = ''; $('#pw').type = 'password'; $('#eleve').classList.add('hidden');
+  setWho(); show('app'); openTab('home');
+}
 async function doLogin() {
   $('#loginErr').textContent = '';
   $('#go').disabled = true;
   try {
+    S.demo = false; // une connexion normale n'est jamais mélangée avec la démonstration
+    const gate = await demoGate($('#id').value, $('#pw').value);
+    if (gate === 'demo') { await startDemo(); $('#go').disabled = false; return; }
+    if (gate === 'blocked') throw new Error('Identifiant ou mot de passe incorrect.');
     const g = await (await fetch(PROXY_URL + '/api/gtk', { method: 'POST' })).json();
     S.cookies = g.cookies || {};
     await login();
@@ -176,7 +212,7 @@ $('#qcmGo').onclick = async () => {
     await login([{ cn: r.data.cn, cv: r.data.cv }]);
   } catch (e) { $('#qcmErr').textContent = e.message; }
 };
-$('#logout').onclick = async () => { await cloud.flush(); S.out = true; clearTimeout(saveT); clearTimeout(cloud.timer); sess.clear(); location.reload(); };
+$('#logout').onclick = async () => { if (S.demo) { demoPurge(); S.out = true; location.reload(); return; } await cloud.flush(); S.out = true; clearTimeout(saveT); clearTimeout(cloud.timer); sess.clear(); location.reload(); };
 $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = null; S.hist = undefined; CF.t = null; CF.cur = null; CF.bin = false; CF.path = []; setWho(); sess.save(); openTab(S.tab); };
 
 // ---------- Onglets ----------
@@ -406,6 +442,7 @@ async function loadMenu(force) {
   };
   const alive = () => S.tab === 'menu' && S.menuWeek === sel.semaine && $('#menuBody');
   let data = force ? null : store.get('ed-menu-v1:' + sel.semaine, null);
+  if (!data && S.demo) data = window.EdunotaDemo.menuData(sel.semaine);
   if (!data) {
     const say = (t) => { const e = $('#menuSay'); if (e && alive()) e.textContent = t; };
     say('Téléchargement du PDF…');
@@ -707,7 +744,7 @@ const files = new Map();
 async function fileBlob(d) {
   const key = d.type + ':' + d.id;
   if (files.has(key)) return files.get(key);
-  const r = await fetch(PROXY_URL + '/api/ed-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, type: d.type, token: S.token, cookies: S.cookies }) }).catch(() => null);
+  const r = await net(PROXY_URL + '/api/ed-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, type: d.type, token: S.token, cookies: S.cookies }) }).catch(() => null);
   if (!r) throw new Error('Relais injoignable');
   const t = r.headers.get('X-Token');
   if (t) { S.token = t; sess.save(); }
@@ -951,7 +988,7 @@ const cloud = {
   timer: null, cur: null, dirty: false, fails: 0, last: 0, st: null,
   // push(délai) : planifie une synchro ; soft = ignorée si une synchro a eu lieu il y a moins de 30 s
   push(delay = 800, soft = false) {
-    if (!S.token || !S.eleve || (soft && Date.now() - cloud.last < 30e3)) return;
+    if (S.demo || !S.token || !S.eleve || (soft && Date.now() - cloud.last < 30e3)) return; // pas de synchro vers École Directe en démonstration
     clearTimeout(cloud.timer);
     cloud.timer = setTimeout(() => { cloud.timer = null; cloud.sync(); }, delay);
   },
@@ -1011,7 +1048,7 @@ const cloud = {
     return dirs.find((n) => n.libelle === '/') || dirs[0] || null;
   },
   async read(file) {
-    const r = await fetch(PROXY_URL + CLOUD.route.read, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: file.id, type: 'CLOUD', token: S.token, cookies: S.cookies }) }).catch(() => null);
+    const r = await net(PROXY_URL + CLOUD.route.read, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: file.id, type: 'CLOUD', token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const t = r.headers.get('X-Token'); if (t) { S.token = t; sess.save(); }
     if (!r.ok) throw new Error('lecture du fichier impossible');
@@ -1020,7 +1057,7 @@ const cloud = {
   async write(a, dir, old, text) {
     if (old && old.libelle !== CLOUD.file) throw new Error('suppression refusée : ce n\'est pas ' + CLOUD.file);
     if (old) await cloud.call(CLOUD.route.drop(a, old)); // le fichier remplacé est toujours bypass.json dans BYPASS
-    const r = await fetch(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: CLOUD.dest(dir.id), name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
+    const r = await net(PROXY_URL + CLOUD.route.write, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: CLOUD.dest(dir.id), name: CLOUD.file, mime: 'application/json', text, token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const o = await r.json().catch(() => ({}));
     if (o.token) S.token = o.token;
@@ -1029,7 +1066,7 @@ const cloud = {
     if (!r.ok || o.error || !o.json || o.json.code !== 200) throw new Error(o.error || (o.json && o.json.message) || 'envoi impossible');
   },
   async run() {
-    if (!S.token || !S.eleve) return;
+    if (S.demo || !S.token || !S.eleve) return;
     cloud.set('sync');
     try {
       const a = CLOUD.acct(), ids = S.eleves.map((e) => String(e.id));
@@ -1218,7 +1255,7 @@ async function loadFiles(note, fresh) {
 async function clSend(file, name, dest) {
   const fd = new FormData();
   fd.append('file', file, name);
-  const r = await fetch(PROXY_URL + '/api/ed-upload-file?dest=' + encodeURIComponent(dest), { method: 'POST', headers: { 'X-Ed-Auth': encodeURIComponent(JSON.stringify({ token: S.token, cookies: S.cookies })) }, body: fd }).catch(() => null);
+  const r = await net(PROXY_URL + '/api/ed-upload-file?dest=' + encodeURIComponent(dest), { method: 'POST', headers: { 'X-Ed-Auth': encodeURIComponent(JSON.stringify({ token: S.token, cookies: S.cookies })) }, body: fd }).catch(() => null);
   if (!r) throw new Error('relais injoignable');
   const o = await r.json().catch(() => ({}));
   if (o.token) S.token = o.token;

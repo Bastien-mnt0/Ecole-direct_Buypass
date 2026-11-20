@@ -198,6 +198,7 @@ td.r{text-align:right}
 .pjb{margin:0;padding:4px 10px;font-size:.82rem;background:var(--card);color:var(--ink);border:1px solid var(--line)}
 .pjb[data-act=dl]{background:var(--accent);color:#0b0e11;border-color:var(--accent)}
 .pjb:disabled{opacity:.6;cursor:wait}
+.pjb[aria-pressed=true]{font-weight:700}
 .pjm,.pjv{flex-basis:100%}
 .pjm{min-height:0}
 .pjm:empty,.pjv:empty{display:none}

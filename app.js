@@ -1,5 +1,6 @@
 // Adresse du relais : vide = même origine (node server.js en local).
 // Pour GitHub Pages, mets l'URL de ton Cloudflare Worker, ex. 'https://ed-proxy.xxx.workers.dev'
+// Si tu changes cette adresse : mets aussi à jour le <link rel="preconnect"> et la directive connect-src de la CSP dans ecoledirecte.html.
 const WORKER_URL = 'https://edunota.didierbleu90.workers.dev';
 const PROXY_URL = ['localhost', '127.0.0.1'].includes(location.hostname) ? '' : WORKER_URL; // en local : serveur node ; en ligne : Worker
 const $ = (s) => document.querySelector(s);
@@ -33,6 +34,8 @@ function show(view) {
 // ---------- Session conservée (jamais le mot de passe) ----------
 // Par défaut : sessionStorage (effacé à la fermeture de l'onglet). Avec « Rester connecté » : localStorage.
 const SESS = 'ed-session';
+// Copies locales de données scolaires (notes des années précédentes) : effacées à la déconnexion, à l'expiration de la session et à l'ouverture sans session active.
+const purgeHist = () => { try { Object.keys(localStorage).filter((k) => k.startsWith('ed-hist-')).forEach((k) => localStorage.removeItem(k)); } catch {} };
 const sess = {
   save() {
     if (S.out || !S.token || !S.eleve) return;
@@ -45,11 +48,11 @@ const sess = {
     }
     return null;
   },
-  clear() { for (const name of ['sessionStorage', 'localStorage']) { try { window[name].removeItem(SESS); } catch {} } },
+  clear() { for (const name of ['sessionStorage', 'localStorage']) { try { window[name].removeItem(SESS); } catch {} } purgeHist(); },
 };
 function restore() {
   const v = sess.load();
-  if (!v) return;
+  if (!v) return purgeHist();
   if (Date.now() - v.at > 12 * 3600e3 || !(v.e || []).length) return sess.clear(); // inactif depuis plus de 12 h
   Object.assign(S, { token: v.t, cookies: v.c || {}, eleves: v.e, keep: v.keep, acc: v.ac || null, school: v.s || '', tab: ['home', 'viescolaire', 'dash', 'notes', 'edt', 'devoirs', 'messages', 'espaces', 'cloud', 'menu', 'pm'].includes(v.a) ? v.a : 'home' });
   S.eleve = S.eleves[v.i] || S.eleves[0];
@@ -78,7 +81,7 @@ async function post(url, body, tries) {
 async function api(path, data) {
   const read = /verbe=get/.test(path) && !/login|doubleauth/.test(path); // les lectures peuvent être rejouées sans risque
   const r = await post(PROXY_URL + '/api/ed', JSON.stringify({ path, data, token: S.token, cookies: S.cookies }), read ? 2 : 1);
-  const o = await r.json().catch(() => ({ error: 'Relais injoignable : renseigne PROXY_URL dans index.html' }));
+  const o = await r.json().catch(() => ({ error: 'Relais injoignable : réessaie dans un instant.' }));
   if (o.error) throw new Error(o.error);
   if (o.token) S.token = o.token;
   if (o.cookies) S.cookies = o.cookies;
@@ -124,7 +127,7 @@ async function login(fa = []) {
   S.eleves = acc.typeCompte === 'E' ? [acc] : acc.profile?.eleves || [];
   if (!S.eleves.length) throw new Error('Aucun élève trouvé sur ce compte.');
   if (res.token) S.token = res.token;
-  store.set('ed-id', $('#id').value.trim());
+  if ($('#keep').checked) store.set('ed-id', $('#id').value.trim()); else try { localStorage.removeItem('ed-id'); } catch {} // l'identifiant n'est mémorisé qu'avec « Rester connecté »
   $('#pw').value = ''; $('#pw').type = 'password';
   const sel = $('#eleve');
   sel.innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
@@ -181,7 +184,7 @@ function openTab(name) {
   if (name === 'menu' && !dpOn()) name = 'home'; // élève non demi-pensionnaire : pas de menu
   S.tab = name; setNav(false);
   $('#ptitle').textContent = { home: 'Accueil', viescolaire: 'Vie scolaire', dash: 'Analyse', notes: 'Notes et Moyennes', edt: 'Emploi du temps', devoirs: 'Cahier de texte', messages: 'Messagerie', espaces: 'Espaces de travail', cloud: 'Cloud', menu: 'Menu de la cantine', pm: 'Porte-monnaie' }[name];
-  document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
+  document.querySelectorAll('[data-tab]').forEach((b) => (b.dataset.tab === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
   $('#appErr').textContent = '';
   $('#view').innerHTML = '<p class="mute">Chargement…</p>';
   ({ home: loadHome, viescolaire: loadVie, dash: loadDash, notes: loadNotes, edt: loadEdt, devoirs: loadDevoirs, messages: () => loadMessages(), espaces: () => loadSpaces(), cloud: () => { if (CF.bin) { CF.bin = false; CF.cur = null; } cloud.push(2500, true); return loadFiles(null, !CF.t || Date.now() - CF.t.at > 30e3); }, menu: () => loadMenu(), pm: loadPM })[name]().catch((e) => { $('#view').innerHTML = ''; $('#appErr').textContent = e.message; });
@@ -306,7 +309,12 @@ function menuParse(words, lum) {
 // Le PDF de menu ne contient aucun texte (lettres dessinées en vectoriel) : on l'affiche en image (pdf.js) puis on le lit par OCR (tesseract.js), tout dans le navigateur.
 // Route des menus : POST /v3/menusRestaurationScolaire.awp?verbe=get → [{ semaine, doc: { id, libelle } }]
 const MENU_TYPES = ['FICHIER_MENU_RESTAURATION']; // confirmé : telechargement.awp?verbe=get&fichierId=<id>&leTypeDeFichier=FICHIER_MENU_RESTAURATION, corps data={forceDownload:0,idEtab:0}
-const menuLoadScript = (src) => new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('Chargement impossible : ' + src)); document.head.appendChild(s); });
+// Empreintes d'intégrité (SRI) des scripts externes : { 'https://…/fichier.js': 'sha384-…' }. Sans entrée, le script est chargé sans contrôle d'intégrité.
+const MENU_SRI = {
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js': 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e',
+  'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js': 'sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F',
+};
+const menuLoadScript = (src) => new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; if (MENU_SRI[src]) { s.integrity = MENU_SRI[src]; s.crossOrigin = 'anonymous'; } s.onload = ok; s.onerror = () => ko(new Error('Chargement impossible : ' + src)); document.head.appendChild(s); });
 let menuLibsP;
 const menuLibs = () => (menuLibsP ||= Promise.all([
   menuLoadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'),
@@ -494,7 +502,7 @@ function renderNotes() {
   const placed = new Set(order.filter((o) => o.code).map((o) => o.code));
   S.subjects.filter((x) => !placed.has(x.code)).forEach((x) => order.push({ code: x.code, name: x.name, prof: '' }));
   const g = general(notes);
-  const ptabs = periodes.map((p) => `<button class="ptab" data-p="${esc(p.codePeriode)}" aria-selected="${p.codePeriode === S.periode}">${esc(p.periode)}</button>`).join('') + `<button class="ptab" data-p="" aria-selected="${!S.periode}">Année</button>`;
+  const ptabs = periodes.map((p) => `<button class="ptab" data-p="${esc(p.codePeriode)}" aria-pressed="${p.codePeriode === S.periode}">${esc(p.periode)}</button>`).join('') + `<button class="ptab" data-p="" aria-pressed="${!S.periode}">Année</button>`;
   const opts = ['<option value="">Toute l\'année</option>'].concat(periodes.map((p) => `<option value="${esc(p.codePeriode)}" ${p.codePeriode === S.periode ? 'selected' : ''}>${esc(p.periode)}</option>`)).join('');
   const ev = (n, isNew) => `<span class="ev ${isNew ? 'new' : ''} ${sig(n) ? '' : 'ns'}" role="button" tabindex="0" data-n="${evRef(n)}" title="Détail de l'évaluation">${sig(n) ? esc(n.valeur) : '(' + esc(n.valeur) + ')'}${(toNum(n.noteSur) || 20) !== 20 ? `<sub> /${esc(n.noteSur)}</sub>` : ''}${(toNum(n.coef) || 1) !== 1 ? `<sup> (${esc(n.coef)})</sup>` : ''}</span>`;
   const rows = order.map((o) => {
@@ -518,7 +526,7 @@ function renderNotes() {
       <tr class="gen"><td class="r gl" colspan="2">Moyenne générale</td><td class="c-avg">${fmt(g)}</td><td colspan="2" class="mute note" style="font-weight:400">${ST.gen != null ? `Officielle (actualisée toutes les 24 h) : ${fmt(ST.gen)} · notes soulignées = nouvelles` : ''}</td></tr></tbody>
     </table></div><div class="sim" id="testnote" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><b>Test de note</b> <select id="tsub" style="width:auto;max-width:240px">${S.testSubs.map((x, i) => `<option value="${i}">${esc(x.name)}</option>`).join('')}</select> note <input id="tval" type="number" min="0" step="0.25" placeholder="15" aria-label="Note"> / <input id="ton" type="number" min="1" value="20" aria-label="Sur"> coef <input id="tcoef" type="number" min="0.25" step="0.25" value="1" aria-label="Coefficient"> <span class="num" id="tres"></span></div><p class="mute" style="font-style:italic;margin:14px 0 6px">Moyennes recalculées en direct à partir de toutes tes notes, nouvelles notes comprises.</p><b>Légende des notes</b><div class="mute">note <sup>(x)</sup> : note coefficientée · note <sub>/X</sub> : note sur X · (note) : note non significative · <u>note</u> : nouvelle note, pas encore dans la moyenne officielle</div></div>`;
   if (S.sub === 'moy') $('#view .card').innerHTML = moyHtml;
-  $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-s="eval" aria-selected="${S.sub !== 'moy'}">Évaluations</button><button data-s="moy" aria-selected="${S.sub === 'moy'}">Moyennes</button></div>`);
+  $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-s="eval" aria-pressed="${S.sub !== 'moy'}">Évaluations</button><button data-s="moy" aria-pressed="${S.sub === 'moy'}">Moyennes</button></div>`);
   document.querySelectorAll('.subtabs button').forEach((b) => (b.onclick = () => { S.sub = b.dataset.s; renderNotes(); }));
   document.querySelectorAll('.ptab').forEach((b) => (b.onclick = () => { S.periode = b.dataset.p; renderNotes(); }));
 }
@@ -633,7 +641,7 @@ function renderDash() {
   const dlt = (v) => `<span class="${v >= 0 ? 'up' : 'dn'}">${v >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(v))}</span>`;
   const ranked = subs.filter((x) => x.avg != null).sort((a, b) => b.avg - a.avg);
   const kpi = (t, v, sub) => `<div class="kpi"><small>${t}</small><b>${v}</b><small>${sub || ''}</small></div>`;
-  const tabs = periodes.map((p) => `<button class="ptab" data-p="${esc(p.codePeriode)}" aria-selected="${p.codePeriode === S.periode}">${esc(p.periode)}</button>`).join('') + `<button class="ptab" data-p="" aria-selected="${!S.periode}">Année</button>`;
+  const tabs = periodes.map((p) => `<button class="ptab" data-p="${esc(p.codePeriode)}" aria-pressed="${p.codePeriode === S.periode}">${esc(p.periode)}</button>`).join('') + `<button class="ptab" data-p="" aria-pressed="${!S.periode}">Année</button>`;
   const items = periodes.map((p) => ({ label: p.periode, v: general(all.filter((n) => n.codePeriode === p.codePeriode)), cls: toNum(p.ensembleMatieres?.moyenneClasse) })).filter((it) => it.v != null);
   const hItems = ((S.hist && S.hist.years) || []).slice().reverse().map((y) => ({ label: y.label, v: general(y.notes) })).filter((it) => it.v != null).concat(general(all) != null ? [{ label: 'En cours', v: general(all) }] : []);
   const cards = subs.sort((a, b) => a.name.localeCompare(b.name)).map((x) => {
@@ -767,7 +775,7 @@ function hwItem(e, grouped) {
   const when = grouped ? '' : `<span class="mute"> · pour ${esc(longDate(e.date))}</span>`;
   const title = e.src === 'me' ? `<div><b>${esc(e.titre)}</b></div>` : '';
   const body = e.text ? `<div>${esc(e.text)}</div>` : e.interro ? '<div><span class="mute">Contrôle annoncé</span></div>' : '';
-  const states = Object.entries(HW_ST).map(([k, l]) => `<button type="button" class="ptab" data-hw="st" data-v="${k}" aria-selected="${e.st === k}">${l}</button>`).join('');
+  const states = Object.entries(HW_ST).map(([k, l]) => `<button type="button" class="ptab" data-hw="st" data-v="${k}" aria-pressed="${e.st === k}">${l}</button>`).join('');
   const urgs = hwSel('data-hwu', [['auto', 'Urgence : auto'], ...Object.entries(HW_UR)], e.urg, 'Urgence');
   const acts = e.src === 'me' ? '<button type="button" class="hwb" data-hw="edit">Modifier</button><button type="button" class="hwb del" data-hw="del">Supprimer</button>' : '';
   return `<div class="hwi ${e.src === 'me' ? 'me' : ''} ${e.st === 'done' ? 'fin' : ''}" data-key="${esc(e.key)}"><div><span class="urg ${e.level}" title="${HW_UR[e.level]}" role="img" aria-label="${HW_UR[e.level]}"></span><b>${esc(e.matiere)}</b>${e.interro ? '<span class="tag tag-c">contrôle</span>' : ''}${e.src === 'me' ? '<span class="tag">personnel</span>' : '<span class="tag tag-ed">École Directe</span>'}${when}</div>${title}${body}${docsHtml(e.docs)}<div class="ctrl hwc"><span class="ptabs">${states}</span>${urgs}${acts}</div></div>`;
@@ -1420,7 +1428,18 @@ async function openCourse(i) {
 }
 $('.mclose').onclick = () => modal.open(false);
 $('#modal').onclick = (e) => { if (e.target === $('#modal')) modal.open(false); };
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#modal').classList.contains('show')) modal.open(false); });
+document.addEventListener('keydown', (e) => {
+  if (!$('#modal').classList.contains('show')) return;
+  if (e.key === 'Escape') return modal.open(false);
+  if (e.key !== 'Tab') return;
+  // Piège à focus : le clavier reste dans la fenêtre tant qu'elle est ouverte
+  const f = [...$('#modal').querySelectorAll('a[href],button,input,select,textarea,[tabindex]')].filter((x) => !x.disabled && x.tabIndex >= 0 && x.offsetParent !== null);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1], cur = document.activeElement;
+  if (!$('#modal').contains(cur)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && cur === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && cur === last) { e.preventDefault(); first.focus(); }
+});
 // Détail d'une évaluation (clic sur une note, comme sur EcoleDirecte)
 function evRef(n) { return (S.evList ||= []).push(n) - 1; }
 function openEval(i) {
@@ -1547,7 +1566,7 @@ async function msgOpen(id, box) {
   } catch (e) { if (!(e && e.message === 'Session expirée')) $('#mbody').innerHTML = `<div class="err" role="alert">${esc(e.message)}</div>`; else modal.open(false); }
 }
 function msgPaint() {
-  const tabs = Object.entries(MSG_BOX).map(([k, v]) => `<button type="button" class="pjb" data-mb="${k}"${k === MSG.box ? ' aria-pressed="true" style="font-weight:700"' : ''}>${v}${k === 'received' && MSG.unread ? ` (${MSG.unread})` : ''}</button>`).join('');
+  const tabs = Object.entries(MSG_BOX).map(([k, v]) => `<button type="button" class="pjb" data-mb="${k}"${k === MSG.box ? ' aria-pressed="true"' : ''}>${v}${k === 'received' && MSG.unread ? ` (${MSG.unread})` : ''}</button>`).join('');
   $('#view').innerHTML = `<div class="card"><div class="sim">${tabs}</div></div><div class="card">${MSG.list.length ? MSG.list.map((m) => msgRow(m, MSG.box)).join('') : '<p class="mute">Aucun message.</p>'}</div>`;
 }
 async function loadMessages() {
@@ -1766,7 +1785,7 @@ async function loadEdt() {
   $('#tod').onclick = () => { S.week = 0; S.dayOff = 0; openTab('edt'); };
   $('#prev').onclick = () => { day ? S.dayOff-- : S.week--; openTab('edt'); };
   $('#next').onclick = () => { day ? S.dayOff++ : S.week++; openTab('edt'); };
-  $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-v="day" aria-selected="${day}">JOUR</button><button data-v="week" aria-selected="${!day}">SEMAINE</button></div>`);
+  $('#view').insertAdjacentHTML('afterbegin', `<div class="subtabs"><button data-v="day" aria-pressed="${day}">JOUR</button><button data-v="week" aria-pressed="${!day}">SEMAINE</button></div>`);
   document.querySelectorAll('.subtabs button').forEach((b) => (b.onclick = () => { S.edtView = b.dataset.v; openTab('edt'); }));
   S.wxR = day ? { a: focus, b: focus, day: true } : { a: iso(mon), b: iso(sun), day: false };
   wxMount('edt');

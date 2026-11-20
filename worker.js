@@ -50,7 +50,7 @@ const okDest = (d) => okCloudPath(d) && d.startsWith('\\') && /(^|\\)mon cloud e
 const uploadFilePath = (dest) => `/v3/televersement.awp?verbe=post&mode=CLOUD&dest=${encodeURIComponent(dest)}`;
 // Jeton et cookies fournis par le navigateur : type et caractères contrôlés avant d'être renvoyés à École Directe (les entrées invalides sont ignorées).
 const cleanToken = (t) => (typeof t === 'string' && /^[\x21-\x7e]{1,4096}$/.test(t) ? t : undefined);
-const cleanCookies = (c) => { const o = {}; if (c && typeof c === 'object' && !Array.isArray(c)) for (const [k, v] of Object.entries(c).slice(0, 50)) { if (typeof v === 'string' && /^[^\s=;,\u0000-\u001f]{1,128}$/u.test(k) && /^[^;\u0000-\u001f\u007f]{0,4096}$/u.test(v)) o[k] = v; else console.log('cookie ignoré :', String(k).slice(0, 40), typeof v, typeof v === 'string' ? v.length : '-'); } return o; };
+const cleanCookies = (c) => { const o = {}; if (c && typeof c === 'object' && !Array.isArray(c)) for (const [k, v] of Object.entries(c).slice(0, 50)) { if (typeof v === 'string' && /^[^\s=;,\u0000-\u001f]{1,1024}$/u.test(k) && /^[^;\u0000-\u001f\u007f]{0,4096}$/u.test(v)) o[k] = v; else console.log('cookie ignoré :', String(k).slice(0, 40), typeof v, typeof v === 'string' ? v.length : '-'); } return o; };
 const readAuth = (h) => { try { const a = JSON.parse(decodeURIComponent(h || '')); return a && typeof a === 'object' && cleanToken(a.token) ? { token: cleanToken(a.token), cookies: cleanCookies(a.cookies) } : null; } catch { return null; } };
 
 // Liste blanche : seules les routes réellement utilisées par app.js sont relayées (le reste de l'API École Directe reste inaccessible).

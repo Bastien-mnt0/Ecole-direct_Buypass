@@ -123,15 +123,25 @@ applyTheme(store.get('ed-theme', matchMedia('(prefers-color-scheme: dark)').matc
 $('#theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 // ---------- Connexion ----------
 function setWho() { $('#school').textContent = S.school || ''; $('#who').textContent = `${S.eleve.prenom} ${S.eleve.nom || ''}`.trim(); syncDp(); }
+// Clés du QCM de sécurité (cn/cv, réutilisables selon la doc) : gardées uniquement avec « Rester connecté », pour un seul identifiant.
+// Elles ne remplacent pas le mot de passe : il reste obligatoire à chaque connexion. Effacées si l'API les refuse.
+const FA_KEY = 'ed-fa';
+const faStore = {
+  get(id) { const o = store.get(FA_KEY, null); return o && o.id === String(id).trim().toLowerCase() && Array.isArray(o.fa) ? o.fa : []; },
+  set(id, fa) { store.set(FA_KEY, { id: String(id).trim().toLowerCase(), fa }); },
+  clear() { try { localStorage.removeItem(FA_KEY); } catch {} },
+};
 async function login(fa = []) {
   const res = await api('/v3/login.awp', { identifiant: $('#id').value.trim(), motdepasse: $('#pw').value, isReLogin: false, uuid: '', fa });
-  if (res.code === 250) return startQcm();
+  if (res.code === 250) { if (fa.length) faStore.clear(); return startQcm(); } // 250 = QCM exigé (clés absentes ou refusées)
   if (res.code !== 200) throw new Error(res.message || 'Connexion refusée (code ' + res.code + ')');
   const acc = res.data.accounts[0];
   S.eleves = acc.typeCompte === 'E' ? [acc] : acc.profile?.eleves || [];
   if (!S.eleves.length) throw new Error('Aucun élève trouvé sur ce compte.');
   if (res.token) S.token = res.token;
   if ($('#keep').checked) store.set('ed-id', $('#id').value.trim()); else try { localStorage.removeItem('ed-id'); } catch {} // l'identifiant n'est mémorisé qu'avec « Rester connecté »
+  if (S.faSave && $('#keep').checked) faStore.set($('#id').value, S.faSave); else if (!$('#keep').checked) faStore.clear();
+  S.faSave = null;
   $('#pw').value = ''; $('#pw').type = 'password';
   const sel = $('#eleve');
   sel.innerHTML = S.eleves.map((e, i) => `<option value="${i}">${esc(e.prenom)} ${esc(e.nom || '')}</option>`).join('');
@@ -144,9 +154,12 @@ async function login(fa = []) {
 async function startQcm() {
   const q = await api('/v3/connexion/doubleauth.awp?verbe=get', {});
   if (q.code !== 200) throw new Error(q.message || 'Double authentification impossible');
+  if (!q.data || !q.data.question || !Array.isArray(q.data.propositions) || !q.data.propositions.length) throw new Error('Question de sécurité indisponible');
   $('#question').textContent = b64(q.data.question);
   $('#choix').innerHTML = q.data.propositions.map((p) => `<option value="${esc(p)}">${esc(b64(p))}</option>`).join('');
+  $('#qcmErr').textContent = ''; $('#qcmGo').disabled = false;
   show('qcm');
+  $('#choix').focus();
 }
 
 // ---------- Session de démonstration (compte fictif, aucun appel École Directe) ----------
@@ -187,7 +200,7 @@ async function doLogin() {
     if (gate === 'blocked') throw new Error('Identifiant ou mot de passe incorrect.');
     const g = await (await fetch(PROXY_URL + '/api/gtk', { method: 'POST' })).json();
     S.cookies = g.cookies || {};
-    await login();
+    await login(faStore.get($('#id').value)); // clés du QCM mémorisées : pas de question ; sinon l'API répond 250 et le QCM s'affiche
   }
   catch (e) { $('#loginErr').textContent = e.message; }
   $('#go').disabled = false;
@@ -205,12 +218,20 @@ $('#eye').onclick = () => {
 $('#id').value = store.get('ed-id', '');
 $('#keep').checked = !!store.get('ed-keep', false);
 $('#qcmGo').onclick = async () => {
+  const choix = $('#choix').value;
   $('#qcmErr').textContent = '';
+  // La réponse doit être envoyée en Base64 (telle que reçue) : sinon École Directe bloque le compte. On vérifie avant d'envoyer, et on empêche le double clic.
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(choix)) { $('#qcmErr').textContent = 'Réponse invalide : rien n\'a été envoyé.'; return; }
+  $('#qcmGo').disabled = true;
   try {
-    const r = await api('/v3/connexion/doubleauth.awp?verbe=post', { choix: $('#choix').value });
+    const r = await api('/v3/connexion/doubleauth.awp?verbe=post', { choix });
     if (r.code !== 200) throw new Error(r.message || 'Mauvaise réponse');
-    await login([{ cn: r.data.cn, cv: r.data.cv }]);
+    const keep = $('#keep').checked; // « Rester connecté » : les clés restent réutilisables (uniq = false), sinon usage unique
+    const fa = [{ cn: r.data.cn, cv: r.data.cv, uniq: keep ? 'false' : 'true' }];
+    S.faSave = keep ? fa : null;
+    await login(fa);
   } catch (e) { $('#qcmErr').textContent = e.message; }
+  $('#qcmGo').disabled = false;
 };
 $('#logout').onclick = async () => { if (S.demo) { demoPurge(); S.out = true; location.reload(); return; } await cloud.flush(); S.out = true; clearTimeout(saveT); clearTimeout(cloud.timer); sess.clear(); location.reload(); };
 $('#eleve').onchange = (e) => { S.eleve = S.eleves[+e.target.value]; S.notes = null; S.hist = undefined; CF.t = null; CF.cur = null; CF.bin = false; CF.path = []; setWho(); sess.save(); openTab(S.tab); };

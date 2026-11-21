@@ -51,7 +51,8 @@ document.documentElement.dataset.theme=t})();
 <tbody>
 <tr><td>Mot de passe EcoleDirecte</td><td>Ton navigateur, puis le relais, puis EcoleDirecte</td><td>Jamais conservé par EDUNOTA ni par le relais (le temps de la requête)</td></tr>
 <tr><td>Identifiant EcoleDirecte</td><td>Idem</td><td>Mémorisé sur ton appareil (stockage local du navigateur) pour pré-remplir le champ, <em>seulement</em> si tu coches « Rester connecté » : il est effacé quand tu te reconnectes sans cocher cette case, ou quand tu effaces les données du site</td></tr>
-<tr><td>Réponse à la question de double authentification</td><td>Idem</td><td>Non conservée</td></tr>
+<tr><td>Réponse à la question de double authentification (QCM de sécurité)</td><td>Idem</td><td>Non conservée</td></tr>
+<tr><td>Clés de validation du QCM de sécurité (« cn » et « cv », fournies par EcoleDirecte après une bonne réponse)</td><td>Reçues d'EcoleDirecte via le relais, puis renvoyées à EcoleDirecte à la connexion suivante</td><td>Mémorisées sur ton appareil (stockage local du navigateur) <em>seulement</em> si tu coches « Rester connecté », pour ne pas répondre au QCM à chaque connexion. Elles ne remplacent pas le mot de passe, qui reste demandé. Sans cette case, elles sont à usage unique et non conservées. Effacées quand tu te reconnectes sans cocher la case, quand EcoleDirecte les refuse, ou quand tu effaces les données du site. Elles ne sont pas effacées par « Déconnexion » : ne coche pas « Rester connecté » sur un appareil partagé.</td></tr>
 <tr><td>Jeton de session, cookies techniques d'EcoleDirecte, liste des élèves du compte, nom de l'établissement</td><td>Reçus d'EcoleDirecte via le relais</td><td>Sur ton appareil : dans la session de l'onglet (effacée à la fermeture), ou dans le stockage local si tu coches « Rester connecté ». À la réouverture du site, une session enregistrée depuis plus de 12 h n'est pas reprise et est effacée. Effacés quand tu te déconnectes. Ne coche pas « Rester connecté » sur un appareil partagé : le jeton donne accès à ton compte.</td></tr>
 <tr><td>Données scolaires affichées : notes et moyennes, emploi du temps, cahier de texte, messages et pièces jointes, espaces de travail et leurs fichiers, vie scolaire (absences, retards, dispenses, punitions, sanctions, encouragements), porte-monnaie, menus de la cantine</td><td>EcoleDirecte, puis le relais, puis ton navigateur, à chaque ouverture d'un onglet</td><td>Gardées en mémoire de la page pendant ta session. Exceptions : les notes des années précédentes (utilisées pour l'onglet Analyse) sont copiées dans le stockage local de ton appareil et rafraîchies après 7 jours. Elles sont effacées à la déconnexion, quand la session expire et quand tu ouvres le site sans session active. Le texte lu dans les menus de cantine (qui ne te concerne pas personnellement) est aussi gardé localement.</td></tr>
 <tr><td>Devoirs personnels, états et urgences des devoirs, espaces de travail masqués</td><td>Ton navigateur, puis le relais, puis ton cloud EcoleDirecte</td><td>Stockage local de ton appareil, et fichier <code>edunota.json</code> dans le dossier « EDUNOTA » de ton cloud EcoleDirecte, pour synchroniser tes appareils. Ce fichier ne contient ni identifiant, ni mot de passe, ni jeton. Conservés jusqu'à ce que tu les supprimes.</td></tr>
@@ -73,7 +74,7 @@ document.documentElement.dataset.theme=t})();
 <p>EDUNOTA ne dépose aucun cookie (ni publicitaire, ni de mesure d'audience). Il utilise en revanche le stockage de ton navigateur (<em>sessionStorage</em> et <em>localStorage</em>), qui n'est pas un cookie mais relève des mêmes règles :</p>
 <ul>
 <li><strong>Session</strong> (jeton, cookies techniques d'EcoleDirecte, liste des élèves) : <em>sessionStorage</em>, ou <em>localStorage</em> si tu coches « Rester connecté ».</li>
-<li><strong>Identifiant</strong> : <em>localStorage</em>, uniquement avec « Rester connecté ».</li>
+<li><strong>Identifiant</strong> et <strong>clés du QCM de sécurité</strong> : <em>localStorage</em>, uniquement avec « Rester connecté ».</li>
 <li><strong>Copies de données</strong> : notes des années précédentes et texte lu dans les menus de cantine.</li>
 <li><strong>Préférences et devoirs personnels</strong> : thème, Mode Sportif, ville et modèle météo, demi-pension, filtres des devoirs, type de menu.</li>
 </ul>
@@ -98,8 +99,8 @@ document.documentElement.dataset.theme=t})();
 
 <h2>7. Effacer tes données</h2>
 <ul>
-<li>Clique sur <strong>Déconnexion</strong> : la session et les copies de tes notes sont effacées de l'appareil.</li>
-<li>Efface les données du site depuis les paramètres de ton navigateur : cela supprime l'identifiant mémorisé, les préférences et les copies locales.</li>
+<li>Clique sur <strong>Déconnexion</strong> : la session et les copies de tes notes sont effacées de l'appareil (l'identifiant et les clés du QCM mémorisés avec « Rester connecté » restent, voir ci-dessous).</li>
+<li>Efface les données du site depuis les paramètres de ton navigateur : cela supprime l'identifiant mémorisé, les clés du QCM de sécurité, les préférences et les copies locales. Te reconnecter <em>sans</em> cocher « Rester connecté » efface aussi l'identifiant et ces clés.</li>
 <li>Supprime le fichier <code>edunota.json</code> (dossier « EDUNOTA ») et les fichiers du dossier « MON CLOUD EDUNOTA » depuis ton cloud EcoleDirecte.</li>
 </ul>
 

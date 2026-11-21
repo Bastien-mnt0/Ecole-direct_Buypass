@@ -8,7 +8,7 @@ const PLATFORMS = [
   {
     id: 'ecoledirecte',
     name: 'École Directe',
-    desc: 'Notes, analyse, emploi du temps et cahier de texte.',
+    desc: 'Notes, analyse, emploi du temps, cahier de texte, vie scolaire, messagerie, cloud, menu de la cantine et porte-monnaie.',
     status: 'available',
     href: 'ecoledirecte.html',
     cta: 'Accéder',

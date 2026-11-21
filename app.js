@@ -389,7 +389,9 @@ function menuInk(ctx, w) { // part d'encre dans le rectangle serré autour du te
 async function menuRead(buf, say) {
   say('Chargement du lecteur…');
   await menuLibs();
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise, page = await pdf.getPage(1), base = page.getViewport({ scale: 1 });
+  // isEvalSupported:false — mitigation recommandée par le projet pdf.js contre CVE-2024-4367 / CVE-2024-34342
+  // (pdf.js 3.11.174 est vulnérable ; à mettre à jour vers ≥4.2.67 dès que possible, voir rapport d'audit).
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf), isEvalSupported: false }).promise, page = await pdf.getPage(1), base = page.getViewport({ scale: 1 });
   say('Lecture du menu (première fois : environ 20 s)…');
   const worker = await Tesseract.createWorker('fra', 1, { logger: (m) => { if (m.status === 'recognizing text') say('Lecture du menu… ' + Math.round(m.progress * 100) + ' %'); } });
   try {
@@ -415,7 +417,7 @@ function menuDayHtml(day, date, today) {
   const R = day.rows, main = ['entree', 'plat', 'acc', 'dessert'].some((k) => (R[k] || []).length);
   const rows = main ? [['entree', 'Entrée'], ['plat', 'Plat'], ['acc', 'Accompagnement'], ['lait', 'Laitage'], ['dessert', 'Dessert']].filter(([k]) => (R[k] || []).length).map(([k, l]) =>
     `<div style="display:flex;gap:12px;padding:8px 0;border-top:1px solid var(--line)"><span class="mute" style="flex:0 0 7.5em">${l}</span><span style="flex:1">${R[k].map((it) => `<div>${it.bold ? '<b>' + esc(it.text) + '</b>' : esc(it.text)}${it.low ? ' <span class="tag">à vérifier</span>' : ''}</div>`).join('')}</span></div>`).join('') : '<p class="mute">Pas de repas prévu.</p>';
-  return `<div class="card"${today ? ' style="border-color:var(--accent,currentColor)"' : ''}><h3 style="margin-top:0">${day.name} ${date.getDate()} ${menuMonth(date)}${today ? ' <span class="tag">aujourd\'hui</span>' : ''}</h3>${rows}</div>`;
+  return `<div class="card"${today ? ' style="border-color:var(--accent,currentColor)"' : ''}><h3 style="margin-top:0">${esc(day.name)} ${date.getDate()} ${menuMonth(date)}${today ? ' <span class="tag">aujourd\'hui</span>' : ''}</h3>${rows}</div>`;
 }
 async function loadMenu(force) {
   const r = await apiCached('/v3/menusRestaurationScolaire.awp?verbe=get', {}, 600e3);
@@ -738,40 +740,49 @@ const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg
 const extOf = (n) => { const m = /\.([a-z0-9]{1,5})$/i.exec(n); return m ? m[1].toLowerCase() : ''; };
 const docsHtml = (docs, extra = '') => !docs || !docs.length ? '' : `<div class="pjs">${docs.map((d) => {
   const e = extOf(d.name);
-  return `<div class="pj" data-id="${esc(d.id)}" data-type="${esc(d.type)}" data-name="${esc(d.name)}"><span class="pjn">${esc(d.name)}</span><span class="tag">${esc((e || 'fichier').toUpperCase())}</span><span class="pja">${MIME[e] ? '<button type="button" class="pjb" data-act="view">Aperçu</button>' : ''}<button type="button" class="pjb" data-act="dl">Télécharger</button>${extra}</span><div class="pjm err" role="alert"></div><div class="pjv"></div></div>`;
+  return `<div class="pj" data-id="${esc(d.id)}" data-type="${esc(d.type)}" data-name="${esc(d.name)}"${d.ent ? ` data-et="${esc(d.ent.type)}" data-ei="${esc(d.ent.id)}"` : ''}><span class="pjn">${esc(d.name)}</span><span class="tag">${esc((e || 'fichier').toUpperCase())}</span><span class="pja">${MIME[e] ? '<button type="button" class="pjb" data-act="view">Aperçu</button>' : ''}<button type="button" class="pjb" data-act="dl">Télécharger</button>${extra}</span><div class="pjm err" role="alert"></div><div class="pjv"></div></div>`;
 }).join('')}</div>`;
 const files = new Map();
 async function fileBlob(d) {
   const key = d.type + ':' + d.id;
   if (files.has(key)) return files.get(key);
-  const r = await net(PROXY_URL + '/api/ed-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, type: d.type, token: S.token, cookies: S.cookies }) }).catch(() => null);
+  const r = await net(PROXY_URL + '/api/ed-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, type: d.type, entity: d.ent, token: S.token, cookies: S.cookies }) }).catch(() => null);
   if (!r) throw new Error('Relais injoignable');
   const t = r.headers.get('X-Token');
   if (t) { S.token = t; sess.save(); }
   if (!r.ok) {
     const o = await r.json().catch(() => ({}));
     if ([520, 521, 525].includes(o.code)) { sess.clear(); show('login'); $('#loginErr').textContent = 'Session expirée : reconnecte-toi.'; }
-    throw new Error(o.error || 'Fichier indisponible');
+    throw new Error((o.error || 'Fichier indisponible') + (o.detail ? ' [' + o.detail + ']' : ''));
   }
-  const b = await r.blob(), e = extOf(d.name);
+  let b = await r.blob(), e = extOf(d.name);
   if (!b.size) throw new Error('Fichier indisponible');
-  const blob = MIME[e] && b.type !== MIME[e] ? new Blob([b], { type: MIME[e] }) : b;
-  const f = { url: URL.createObjectURL(blob), type: blob.type };
+  // On identifie le fichier d'après son contenu (et non l'en-tête Content-Type, parfois faux) : évite les PDF « cassés » et les .html téléchargés par erreur.
+  let head = new Uint8Array(await b.slice(0, 16).arrayBuffer());
+  let txt = String.fromCharCode(...head);
+  if (/^\s*JVBER/.test(txt)) { // PDF renvoyé encodé en base64
+    try { const raw = atob((await b.text()).replace(/^data:[^,]*,/, '').replace(/\s+/g, '')); b = new Blob([Uint8Array.from(raw, (c) => c.charCodeAt(0))]); head = new Uint8Array(await b.slice(0, 16).arrayBuffer()); txt = String.fromCharCode(...head); } catch {}
+  }
+  const sniff = txt.startsWith('%PDF') ? 'pdf' : txt.startsWith('\x89PNG') ? 'png' : txt.startsWith('\xff\xd8\xff') ? 'jpg' : txt.startsWith('GIF8') ? 'gif' : txt.startsWith('RIFF') && txt.slice(8, 12) === 'WEBP' ? 'webp' : '';
+  if (!sniff && /^\s*(<!doctype|<html|<head|<body|<\?xml|<!--)/i.test(txt)) throw new Error('Le relais a renvoyé une page web au lieu du fichier [' + (await b.slice(0, 200).text()).replace(/\s+/g, ' ').slice(0, 160) + ']');
+  const kind = sniff || e;
+  const blob = MIME[kind] ? new Blob([b], { type: MIME[kind] }) : b.type && b.type !== 'text/html' ? b : new Blob([b], { type: 'application/octet-stream' });
+  const name = MIME[kind] && extOf(d.name) !== kind && !(kind === 'jpg' && e === 'jpeg') ? d.name.replace(/\.[a-z0-9]{1,5}$/i, '') + '.' + kind : d.name;
+  const f = { url: URL.createObjectURL(blob), type: blob.type, name };
   files.set(key, f);
   return f;
 }
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('.pjb:not([data-cl])'); if (!b) return;
-  const row = b.closest('.pj'), d = { id: row.dataset.id, type: row.dataset.type, name: row.dataset.name }, msg = row.querySelector('.pjm'), view = row.querySelector('.pjv'), label = b.textContent;
+  const row = b.closest('.pj'), d = { id: row.dataset.id, type: row.dataset.type, name: row.dataset.name, ent: row.dataset.et ? { type: row.dataset.et, id: Number(row.dataset.ei) } : undefined }, msg = row.querySelector('.pjm'), view = row.querySelector('.pjv'), label = b.textContent;
   msg.textContent = '';
   if (b.dataset.act === 'view' && view.firstChild) { view.innerHTML = ''; b.textContent = 'Aperçu'; return; }
   b.disabled = true; b.textContent = 'Chargement…';
   try {
     const f = await fileBlob(d);
     if (b.dataset.act === 'dl') {
-      const ext = Object.entries(MIME).find(([, m]) => m === f.type);
-      const a = Object.assign(document.createElement('a'), { href: f.url, download: extOf(d.name) || !ext ? d.name : d.name + '.' + ext[0] });
-      document.body.appendChild(a); a.click(); a.remove();
+      const a = Object.assign(document.createElement('a'), { href: f.url, download: f.name || d.name, rel: 'noopener' });
+      a.style.display = 'none'; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
       b.textContent = label;
     } else if (f.type.startsWith('image/')) {
       view.innerHTML = `<img src="${f.url}" alt="${esc(d.name)}">`; b.textContent = 'Masquer';
@@ -1048,7 +1059,7 @@ const cloud = {
     return dirs.find((n) => n.libelle === '/') || dirs[0] || null;
   },
   async read(file) {
-    const r = await net(PROXY_URL + CLOUD.route.read, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: file.id, type: 'CLOUD', token: S.token, cookies: S.cookies }) }).catch(() => null);
+    const r = await net(PROXY_URL + CLOUD.route.read, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: file.id, type: 'CLOUD', entity: CLOUD.acct(), token: S.token, cookies: S.cookies }) }).catch(() => null);
     if (!r) throw new Error('relais injoignable');
     const t = r.headers.get('X-Token'); if (t) { S.token = t; sess.save(); }
     if (!r.ok) throw new Error('lecture du fichier impossible');
@@ -1240,7 +1251,7 @@ async function loadFiles(note, fresh) {
   const dirRows = dirs.map((d) => `<div class="pj" data-id="${esc(d.id)}"${CF.bin ? '' : ` data-drop="${esc(d.id)}"`}><span class="pjn">${esc(d.libelle)}</span><span class="tag">DOSSIER</span><span class="pja"><button type="button" class="pjb" data-cl="go" data-id="${esc(d.id)}">Ouvrir</button>${acts}</span></div>`).join('');
   const binRows = docs.map((d) => `<div class="pj" data-id="${esc(d.id)}"><span class="pjn">${esc(d.libelle)}</span><span class="tag">${esc((extOf(d.libelle) || 'fichier').toUpperCase())}</span><span class="pja">${acts}</span></div>`).join('');
   const list = !dirs.length && !docs.length ? `<p class="mute">${CF.bin ? 'Ce dossier de la corbeille est vide.' : 'Ce dossier est vide.'}</p>`
-    : (dirRows ? `<div class="pjs">${dirRows}</div>` : '') + (CF.bin ? (binRows ? `<div class="pjs">${binRows}</div>` : '') : docsHtml(docs.map((d) => ({ id: d.id, type: 'CLOUD', name: d.libelle })), acts));
+    : (dirRows ? `<div class="pjs">${dirRows}</div>` : '') + (CF.bin ? (binRows ? `<div class="pjs">${binRows}</div>` : '') : docsHtml(docs.map((d) => ({ id: d.id, type: 'CLOUD', name: d.libelle, ent: { type: CLOUD.acct().type, id: CLOUD.acct().id } })), acts));
   const legacy = !CF.bin && home.libelle !== CF.name ? `<p class="mute">Ce dossier s'appelle « ${esc(home.libelle)} » sur École Directe. Pour obtenir « ${CF.name} », renomme-le ou mets-le à la corbeille sur le site d'École Directe : EDUNOTA le recréera.</p>` : '';
   const tools = CF.bin
     ? `<div class="card"><p class="mute">Éléments mis à la corbeille depuis « Mon cloud EDUNOTA ». Restaurer les remet dans le cloud ; la suppression définitive est irréversible.</p><div class="sim"><button type="button" class="pjb" data-cl="home">Retour au cloud</button></div><p class="mute" id="clMsg" role="status"></p><div class="err" id="clErr" role="alert"></div></div>`
@@ -1718,7 +1729,7 @@ async function wsBrowse(folder) {
     const byName = (a, b) => String(a.libelle).localeCompare(String(b.libelle), 'fr', { numeric: true });
     const dirs = kids.filter(wsIsDir).sort(byName), fls = kids.filter((k) => !wsIsDir(k)).sort(byName);
     const crumbs = trail.map((x, i) => i === trail.length - 1 ? `<b>${esc(i ? x.libelle : 'Cloud')}</b>` : `<button type="button" class="pjb" data-wf="${i ? esc(x.id) : ''}">${esc(i ? x.libelle : 'Cloud')}</button>`).join(' › ');
-    box.innerHTML = `<p class="mute" style="margin-top:12px">${crumbs}</p>${dirs.map((k) => `<button type="button" class="pjb" data-wf="${esc(k.id)}" style="display:block;width:100%;text-align:left;margin:4px 0">📁 ${esc(k.libelle)}</button>`).join('')}${docsHtml(fls.map((k) => ({ id: k.id, type: 'CLOUD', name: String(k.libelle) })))}${dirs.length || fls.length ? '' : '<p class="mute">Dossier vide.</p>'}`;
+    box.innerHTML = `<p class="mute" style="margin-top:12px">${crumbs}</p>${dirs.map((k) => `<button type="button" class="pjb" data-wf="${esc(k.id)}" style="display:block;width:100%;text-align:left;margin:4px 0">📁 ${esc(k.libelle)}</button>`).join('')}${docsHtml(fls.map((k) => ({ id: k.id, type: 'CLOUD', name: String(k.libelle), ent: { type: 'W', id: ws.id } })))}${dirs.length || fls.length ? '' : '<p class="mute">Dossier vide.</p>'}`;
   } catch (e) { if (e && e.message === 'Session expirée') modal.open(false); else box.innerHTML = `<div class="err" role="alert">${esc(e.message)}</div>`; }
 }
 document.addEventListener('click', (e) => {

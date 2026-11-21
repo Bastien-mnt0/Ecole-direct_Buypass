@@ -2,6 +2,21 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
+<!-- Protection anti-clickjacking (défense en profondeur) : GitHub Pages ne permet pas d'envoyer
+     un en-tête HTTP X-Frame-Options ou une directive CSP frame-ancestors (ignorée si mise en <meta>).
+     À défaut, on masque la page tant qu'elle n'est pas confirmée hors d'un cadre (iframe), et on
+     tente de rediriger la fenêtre de plus haut niveau si c'est le cas. Voir rapport d'audit :
+     la vraie correction consiste à servir le site via un proxy/CDN capable d'ajouter cet en-tête
+     (ex. Cloudflare en façade de GitHub Pages avec une règle de transformation d'en-têtes). -->
+<style>html{visibility:hidden}</style>
+<script>
+(function () {
+  try {
+    if (window.self === window.top) { document.documentElement.style.visibility = 'visible'; return; }
+    window.top.location = window.self.location.href;
+  } catch (e) { document.documentElement.style.visibility = 'visible'; }
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EDUNOTA — École Directe</title>
 <meta name="robots" content="noindex, nofollow">
@@ -65,6 +80,6 @@
 
 <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle"><div class="mbox"><button type="button" class="mclose" aria-label="Fermer">×</button><h3 id="mtitle"></h3><div id="mbody"></div></div></div>
 
-<script src="app.js?v=61" defer></script>
+<script src="app.js?v=65" defer></script>
 </body>
 </html>

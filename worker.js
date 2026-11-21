@@ -6,8 +6,8 @@ const CLOUD_VERSION = '4.104.4'; // version utilisée par le site officiel pour 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 // Routes récentes (cloud, menus de la cantine) : on utilise la version du site officiel
-const newer = (p) => p.startsWith('/v3/cloud/') || p.startsWith('/v3/menusRestaurationScolaire') || p.includes('leTypeDeFichier=FICHIER_MENU_RESTAURATION');
-async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form, upload } = {}) {
+const newer = (p) => p.startsWith('/v3/cloud/') || p.startsWith('/v3/menusRestaurationScolaire') || p.includes('leTypeDeFichier=FICHIER_MENU_RESTAURATION') || p.includes('leTypeDeFichier=CLOUD');
+async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = false, form, upload, ver } = {}) {
   const jar = { ...cookies };
   const headers = {
     'User-Agent': UA,
@@ -20,7 +20,7 @@ async function ed(urlPath, { method = 'POST', token, data, cookies = {}, raw = f
   if (upload) headers['Content-Type'] = upload.type; // multipart déjà construit par le navigateur (frontière incluse)
   if (jar.GTK) headers['X-GTK'] = jar.GTK;
   if (token) headers['X-Token'] = token;
-  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${newer(urlPath) ? CLOUD_VERSION : API_VERSION}`, {
+  const res = await fetch(`${BASE}${urlPath}${urlPath.includes('?') ? '&' : '?'}v=${ver || (newer(urlPath) ? CLOUD_VERSION : API_VERSION)}`, {
     method,
     headers,
     body: upload ? upload.body : form || (method === 'POST' ? 'data=' + encodeURIComponent(JSON.stringify(data || {})) : undefined),
@@ -116,14 +116,23 @@ export default {
         return reply(await ed(uploadFilePath(dest), { token: auth.token, cookies: auth.cookies, upload: { type, body } }));
       }
       if (req.method === 'POST' && pathname === '/api/ed-file') {
-        const { id, type, token, cookies } = await req.json();
+        const { id, type, token, cookies, entity } = await req.json();
         if (!okFileId(id, type) || !/^[A-Z_]+$/.test(String(type))) return reply({ error: 'fichier refusé' }, 400);
-        const out = await ed(`/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, { token: cleanToken(token), cookies: cleanCookies(cookies), data: type === 'FICHIER_MENU_RESTAURATION' ? { forceDownload: 0, idEtab: 0 } : {}, raw: true });
-        const ct = out.res.headers.get('content-type') || '';
-        if (!out.res.ok || ct.includes('json')) {
-          const j = await out.res.json().catch(() => ({}));
+        const fp = `/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(id)}&leTypeDeFichier=${type}`, fo = { token: cleanToken(token), cookies: cleanCookies(cookies), data: type === 'FICHIER_MENU_RESTAURATION' ? { forceDownload: 0, idEtab: 0 } : type === 'CLOUD' && entity && /^[A-Z]$/.test(String(entity.type)) && Number.isInteger(Number(entity.id)) && Number(entity.id) > 0 ? { forceDownload: 0, idEntity: Number(entity.id), typeEntity: String(entity.type) } : {}, raw: true };
+        let out, ct = '', tried = [];
+        // Fichiers du cloud / espaces de travail : l'identifiant est un chemin (\\SERVEUR\cloud\...). On essaie plusieurs formes du chemin et plusieurs variantes de requête (POST/GET, version de l'API)
+        // jusqu'à obtenir un vrai fichier : École Directe renvoie sa page web (HTML) quand la requête n'est pas reconnue.
+        const sid = String(id), idForms = [sid];
+        const pathOf = (i, extra = '') => `/v3/telechargement.awp?verbe=get&fichierId=${encodeURIComponent(i)}&leTypeDeFichier=${type}${extra}`;
+        outer: for (const i of idForms) for (const v of [{}, { method: 'GET' }, { ver: CLOUD_VERSION }, { method: 'GET', ver: CLOUD_VERSION }]) {
+          out = await ed(pathOf(i, v.method === 'GET' ? '&forceDownload=0' : ''), { ...fo, ...v }); ct = out.res.headers.get('content-type') || '';
+          tried.push(i.slice(0, 60) + ' ' + (v.method || 'POST') + (v.ver ? '@' + v.ver : '') + ':' + out.res.status + ' ' + ct.split(';')[0]);
+          if (!ct.includes('html')) break outer;
+        }
+        if (!out.res.ok || ct.includes('json') || ct.includes('html')) {
+          const t = await out.res.text().catch(() => ''); let j = {}; try { j = JSON.parse(t); } catch {}
           const expired = [520, 521, 525].includes(j.code);
-          return reply({ error: expired ? 'Session expirée' : j.message || 'Fichier indisponible', code: j.code }, expired ? 401 : 404);
+          return reply({ error: expired ? 'Session expirée' : j.message || 'Fichier indisponible', code: j.code, detail: `${tried.join(' | ')} ${t.replace(/\s+/g, ' ').slice(0, 160)}` }, expired ? 401 : 404);
         }
         const h = { ...cors, 'Content-Type': ct || 'application/octet-stream' };
         if (out.token) h['X-Token'] = out.token;

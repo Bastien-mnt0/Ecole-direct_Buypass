@@ -64,6 +64,7 @@ const ROUTES = [
   /^\/v3\/cloud\/[A-Z]\/[\w-]+(\/visibility)?\.awp$/,
   /^\/v3\/comptes\/detail\.awp$/,
   /^\/v3\/menusRestaurationScolaire\.awp$/,
+  /^\/v3\/messagerie\/contacts\/(professeurs|personnels)\.awp$/,
 ];
 const okRoute = (p) => {
   const i = p.indexOf('?'), name = i < 0 ? p : p.slice(0, i), qs = i < 0 ? '' : p.slice(i + 1);

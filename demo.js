@@ -211,6 +211,20 @@
     for (const box of Object.keys(MSGS)) { const m = msgRows(box).find((x) => String(x.id) === String(id)); if (m) { msgState[m.id] = true; return m; } }
     return null;
   }
+  // Contacts (professeurs et personnel fictifs) et envoi : le message est seulement ajouté aux « Envoyés » en mémoire
+  const person = (full, extra) => { const [civilite, nom, ...p] = full.split(' '); return { civilite, nom, prenom: p.join(' '), particule: '', sexe: '', photo: '', badge: '', telephone: '', email: '', estBlackList: false, messagerieActive: true, isPP: false, etablissements: [], idRegime: 0, classe: { id: 0, code: '', libelle: '' }, responsable: { id: 0, versQui: '', typeResp: '', contacts: [] }, ...extra }; };
+  const contacts = (kind) => kind === 'professeurs'
+    ? SUBJ.map((s, i) => person(s.prof, { id: 100 + i, type: 'P', matiere: s.n.toUpperCase(), classes: [{ id: 1, code: '', libelle: ELEVE.classe, isPP: false, matiere: s.n.toUpperCase() }], fonction: { id: 0, libelle: '' } }))
+    : [['Mme ROSSI Nadia', 'CPE'], ['Mme MARCHAND Élise', 'Documentaliste'], ['M. DUPUIS Marc', 'Conseiller principal'], ['Mme LEROY Anne', 'Secrétariat']].map(([n, f], i) => person(n, { id: 200 + i, type: 'A', matiere: '', fonction: { id: 10 + i, libelle: f } }));
+  let msgSeq = 300;
+  function sendMessage(data) {
+    const m = (data || {}).message || {}, to = (m.groupesDestinataires || []).flatMap((g) => g.destinataires || []);
+    if (!m.subject || !to.length || !m.content) return { code: 400, message: 'Message incomplet' };
+    let html = ''; try { html = new TextDecoder().decode(Uint8Array.from(atob(m.content), (c) => c.charCodeAt(0))); } catch { return { code: 400, message: 'Contenu invalide' }; }
+    const id = ++msgSeq;
+    MSGS.sent.unshift([id, String(m.subject).slice(0, 150), to.map((d) => [d.civilite, d.prenom, d.nom].filter(Boolean).join(' ')).join(', '), true, 0, html]);
+    return { code: 200, message: 'Votre message a bien été envoyé.', data: { id } };
+  }
 
   // ---------- Espaces de travail ----------
   const SPACES = [
@@ -317,7 +331,8 @@
     let m;
     if (/^\/v3\/eleves\/[^/]+\/notes\.awp$/i.test(name)) return { code: 200, data: notesData((data || {}).anneeScolaire || '') };
     if (/^\/v3\/eleves\/[^/]+\/viescolaire\.awp$/i.test(name)) return { code: 200, data: vie() };
-    if (/^\/v3\/(eleves|familles)\/[^/]+\/messages\.awp$/i.test(name)) return { code: 200, data: messages(q.get('typeRecuperation') || 'received') };
+    if (/^\/v3\/(eleves|familles)\/[^/]+\/messages\.awp$/i.test(name)) return verbe === 'post' ? sendMessage(data) : { code: 200, data: messages(q.get('typeRecuperation') || 'received') };
+    if ((m = /^\/v3\/messagerie\/contacts\/(professeurs|personnels)\.awp$/.exec(name))) return { code: 200, data: { contacts: contacts(m[1]) } };
     if ((m = /^\/v3\/(?:eleves|familles)\/[^/]+\/messages\/([\w-]+)\.awp$/i.exec(name))) { const x = message(m[1]); return x ? { code: 200, data: x } : { code: 404, message: 'Message introuvable' }; }
     if (/^\/v3\/E\/[^/]+\/emploidutemps\.awp$/.test(name)) return { code: 200, data: edt(data.dateDebut, data.dateFin) };
     if (/^\/v3\/E\/[^/]+\/espacestravail\.awp$/.test(name)) return { code: 200, data: clone(SPACES) };

@@ -1615,8 +1615,102 @@ async function msgOpen(id, box) {
 }
 function msgPaint() {
   const tabs = Object.entries(MSG_BOX).map(([k, v]) => `<button type="button" class="pjb" data-mb="${k}"${k === MSG.box ? ' aria-pressed="true"' : ''}>${v}${k === 'received' && MSG.unread ? ` (${MSG.unread})` : ''}</button>`).join('');
-  $('#view').innerHTML = `<div class="card"><div class="sim">${tabs}</div></div><div class="card">${MSG.list.length ? MSG.list.map((m) => msgRow(m, MSG.box)).join('') : '<p class="mute">Aucun message.</p>'}</div>`;
+  const lock = '<button type="button" class="pjb" data-mn="1">Nouveau message</button>';
+  $('#view').innerHTML = `<div class="card"><div class="sim">${tabs}${lock}</div></div><div class="card">${MSG.list.length ? MSG.list.map((m) => msgRow(m, MSG.box)).join('') : '<p class="mute">Aucun message.</p>'}</div>`;
 }
+// ---------- Envoi de message (phase de test : verrouillé, déverrouillage par code) ----------
+// Doc : docsdirecte.scolup.qzz.io/docs/messages/envoi. Le code n'est pas dans le fichier, seulement son empreinte PBKDF2 ; le déverrouillage n'est valable que pour la session ouverte (mémoire).
+const MSGLOCK = { salt: '5466b9928804d5dee0e92cc8eaaa4bf0', hash: 'a521d10a77717a70aed402a179b4756298f4badefb6b6a3859cb8807f2b99dd3', iter: 100000 };
+async function msgLockHash(text) {
+  const salt = Uint8Array.from(MSGLOCK.salt.match(/../g).map((h) => parseInt(h, 16)));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(text), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: MSGLOCK.iter }, key, 256);
+  return [...new Uint8Array(bits)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+// Déverrouillage dans la fenêtre de rédaction : seul le bouton « Envoyer » est verrouillé
+function msgUnlockInline() {
+  const w = $('#mnUw'); if (!w) return;
+  w.innerHTML = '<label for="muC">Code de déverrouillage</label><div class="sim"><input id="muC" type="password" autocomplete="off" style="flex:1;min-width:0"><button type="button" class="pjb" id="muGo">Valider</button></div><div id="muE" class="err" role="alert"></div>';
+  const go = async () => {
+    $('#muE').textContent = '';
+    try {
+      if (!(window.crypto && crypto.subtle)) throw new Error('Navigateur incompatible');
+      if (await msgLockHash($('#muC').value.trim().toLowerCase()) !== MSGLOCK.hash) throw new Error('Code incorrect.');
+      S.msgOk = true;
+      const b = $('#mnGo'); b.disabled = false; b.removeAttribute('aria-disabled');
+      $('#mnLk').remove(); w.innerHTML = '';
+    } catch (e) { if ($('#muE')) $('#muE').textContent = e.message; }
+  };
+  $('#muGo').onclick = go;
+  $('#muC').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+  $('#muC').focus();
+}
+const msgCan = () => S.msgOk || S.demo; // pas de verrou en démonstration : rien n'est réellement envoyé
+const MSG_KINDS = { professeurs: ['Professeurs', 'P'], personnels: ['Personnel', 'A'] };
+const msgName = (c) => [c.civilite, c.prenom, c.nom].filter(Boolean).join(' ');
+const msgMat = (c) => c.matiere || ((c.classes || [])[0] || {}).matiere || (c.fonction && c.fonction.libelle) || '';
+async function msgContacts(kind) {
+  const cl = (S.eleve.classe || (S.eleve.profile || {}).classe || {}).id || 0;
+  const r = await apiCached(`/v3/messagerie/contacts/${kind}.awp?nom=&idClasse=${encodeURIComponent(cl)}&verbe=get`, {}, 300e3);
+  if (r.code !== 200) throw new Error(r.message || 'Contacts indisponibles (code ' + r.code + ')');
+  return (Array.isArray(r.data && r.data.contacts) ? r.data.contacts : []).filter((c) => c && c.id != null).map((c) => ({ ...c, type: c.type || MSG_KINDS[kind][1] }));
+}
+function msgCompose() {
+  S.msgSel = new Map(); S.msgList = [];
+  $('#mtitle').textContent = 'Nouveau message';
+  $('#mbody').innerHTML = `<p class="mute"><span class="tag">test</span> ${S.demo ? 'Démonstration : rien n\'est réellement envoyé.' : S.msgOk ? 'Envoi réel : le message part depuis ton compte École Directe.' : 'Tu peux rédiger, mais le bouton « Envoyer » est verrouillé : fonction uniquement en phase de test.'}</p><label for="mnK">Destinataires</label><select id="mnK">${Object.entries(MSG_KINDS).map(([k, v]) => `<option value="${k}">${v[0]}</option>`).join('')}</select><input id="mnQ" placeholder="Filtrer par nom ou matière" aria-label="Filtrer les destinataires" style="margin-top:6px"><div id="mnL" style="max-height:200px;overflow:auto;margin-top:6px"></div><p class="mute" id="mnSel"></p><label for="mnS">Objet</label><input id="mnS" maxlength="150"><label for="mnC">Message</label><textarea id="mnC" rows="6" maxlength="5000"></textarea><div class="sim" style="margin-top:12px"><button type="button" id="mnGo" style="margin:0"${msgCan() ? '' : ' disabled aria-disabled="true" title="Envoi verrouillé : uniquement en test"'}>Envoyer</button>${msgCan() ? '' : '<span id="mnLk" class="sim"><span class="tag">test uniquement</span><button type="button" class="pjb" id="mnUn">Déverrouiller</button></span>'}</div><div id="mnUw"></div><div id="mnE" class="err" role="alert"></div>`;
+  modal.open(true);
+  msgKindLoad();
+}
+async function msgKindLoad() {
+  const box = $('#mnL'); if (!box) return;
+  box.innerHTML = '<p class="mute">Chargement…</p>';
+  try { S.msgList = await msgContacts($('#mnK').value); msgListPaint(); }
+  catch (e) { if (e.message !== 'Session expirée' && $('#mnL')) $('#mnL').innerHTML = `<div class="err" role="alert">${esc(e.message)}</div>`; }
+}
+function msgListPaint() {
+  const box = $('#mnL'); if (!box) return;
+  const q = norm($('#mnQ').value);
+  const rows = S.msgList.map((c, i) => ({ c, i })).filter(({ c }) => !q || norm(msgName(c) + ' ' + msgMat(c)).includes(q));
+  box.innerHTML = rows.map(({ c, i }) => `<label class="keep" style="margin:4px 0"><input type="checkbox" data-mc="${i}"${S.msgSel.has(c.type + ':' + c.id) ? ' checked' : ''}${c.messagerieActive === false ? ' disabled' : ''}> <span>${esc(msgName(c))}${msgMat(c) ? ` <span class="mute">· ${esc(msgMat(c))}</span>` : ''}</span></label>`).join('') || '<p class="mute">Aucun contact.</p>';
+  const n = S.msgSel.size;
+  $('#mnSel').textContent = n ? n + ' destinataire' + (n > 1 ? 's' : '') + ' : ' + [...S.msgSel.values()].map(msgName).join(', ') : 'Aucun destinataire choisi.';
+}
+const msgB64 = (s) => { let b = ''; for (const x of new TextEncoder().encode(s)) b += String.fromCharCode(x); return btoa(b); };
+async function msgSend() {
+  const sel = [...S.msgSel.values()], subject = $('#mnS').value.trim(), text = $('#mnC').value.trim(), err = $('#mnE'), btn = $('#mnGo');
+  err.textContent = '';
+  if (!msgCan()) { err.textContent = 'Envoi verrouillé : uniquement en phase de test.'; return; }
+  if (!sel.length || !subject || !text) { err.textContent = 'Choisis au moins un destinataire et renseigne l\'objet et le message.'; return; }
+  if (!confirm(`Envoyer ce message à ${sel.length} destinataire${sel.length > 1 ? 's' : ''} ?`)) return;
+  const a = CLOUD.acct(), slug = (s) => norm(s).toLowerCase().replace(/ /g, '-'), now = new Date();
+  const dest = (c) => ({ civilite: c.civilite || '', nom: c.nom || '', prenom: c.prenom || '', particule: c.particule || '', type: c.type, id: c.id, sexe: c.sexe || '', matiere: msgMat(c), classe: c.classe || { id: 0, libelle: '', code: '' }, photo: c.photo || '', badge: c.badge || '', etablissements: c.etablissements || [], responsable: c.responsable || { id: 0, typeResp: '', versQui: '', contacts: [] }, fonction: c.fonction || { id: 0, libelle: '' }, isPP: !!c.isPP, classes: c.classes || [], isSelected: true, uniqID: `${c.id}_${c.type}_0_0_${slug(msgMat(c))}`, idRegime: c.idRegime || 0, to_cc_cci: 'to' });
+  const groups = {};
+  for (const c of sel) (groups[c.type] ||= []).push(dest(c));
+  const message = { subject, content: msgB64('<p>' + esc(text).replace(/\n/g, '<br>') + '</p>'), groupesDestinataires: Object.entries(groups).map(([type, destinataires]) => ({ destinataires, selection: { type } })), transfertFiles: [], files: [], date: iso(now) + ' ' + now.toTimeString().slice(0, 8), read: true, from: { role: a.type, id: a.type === 'E' ? S.eleve.id : a.id, read: true }, brouillon: false };
+  btn.disabled = true; btn.textContent = 'Envoi…';
+  try {
+    const r = await api(`${msgBase()}/messages.awp?verbe=post`, { message, anneeMessages: '' });
+    if (r.code !== 200) throw new Error(r.message || 'Envoi refusé (code ' + r.code + ')');
+    modal.open(false);
+    MSG.box = 'sent';
+    if (S.tab === 'messages') { $('#view').innerHTML = '<p class="mute">Message envoyé. Chargement…</p>'; await loadMessages(); }
+  } catch (e) { if (e.message !== 'Session expirée') { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Envoyer'; } else modal.open(false); }
+}
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'mnUn') return msgUnlockInline();
+  const n = e.target.closest('[data-mn]'); if (n) return msgCompose();
+  if (e.target.id === 'mnGo') msgSend();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'mnK') return msgKindLoad();
+  const c = e.target.closest && e.target.closest('[data-mc]'); if (!c) return;
+  const k = S.msgList[+c.dataset.mc]; if (!k) return;
+  const key = k.type + ':' + k.id;
+  if (c.checked) S.msgSel.set(key, k); else S.msgSel.delete(key);
+  msgListPaint();
+});
+document.addEventListener('input', (e) => { if (e.target.id === 'mnQ') msgListPaint(); });
 async function loadMessages() {
   const r = await msgFetch(MSG.box);
   MSG.list = r.list; MSG.unread = MSG.box === 'received' ? r.unread : MSG.unread;
